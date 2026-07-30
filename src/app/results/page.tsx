@@ -1,8 +1,8 @@
 import { GraduationCap } from 'lucide-react';
 import { activeYear } from '@/lib/years';
-import { listSubjects, evaluateAll } from '@/lib/data';
+import { listSections, evaluateAll } from '@/lib/data';
 import { NeedYear, Card, CardHeader, Badge, EmptyState, resultTone } from '@/components/ui';
-import { SubjectSwitcher } from '@/components/subject-switcher';
+import { SectionSwitcher } from '@/components/subject-switcher';
 import { OVERALL_LABEL, PASS_MIN_RATIO } from '@/lib/evaluate';
 
 export const metadata = { title: 'ผลการเรียน · Track' };
@@ -10,21 +10,21 @@ export const metadata = { title: 'ผลการเรียน · Track' };
 export default async function ResultsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ subject?: string }>;
+  searchParams: Promise<{ section?: string }>;
 }) {
   const year = await activeYear();
   if (!year) return <NeedYear />;
 
-  const subjects = await listSubjects(true);
-  if (subjects.length === 0)
+  const sections = await listSections(year.id);
+  if (sections.length === 0)
     return (
-      <EmptyState icon={<GraduationCap className="size-8" strokeWidth={1.5} />} title="ยังไม่มีวิชาเสริม" hint="เพิ่มวิชาและจัดนักเรียนก่อน" />
+      <EmptyState icon={<GraduationCap className="size-8" strokeWidth={1.5} />} title="ยังไม่มีกลุ่มเรียน" hint="จัดนักเรียนเข้าวิชาก่อน" />
     );
 
   const sp = await searchParams;
-  const current = sp.subject ? Number(sp.subject) : subjects[0].id;
-  const subject = subjects.find((s) => s.id === current) ?? subjects[0];
-  const rows = await evaluateAll(subject.id, year.id);
+  const current = sp.section ? Number(sp.section) : sections[0].id;
+  const section = sections.find((s) => s.id === current) ?? sections[0];
+  const rows = await evaluateAll(section.id);
 
   const summary = { excellent: 0, pass: 0, fail: 0, pending: 0 };
   for (const r of rows) summary[r.evaluation.overall] += 1;
@@ -38,7 +38,7 @@ export default async function ResultsPage({
             คำนวณอัตโนมัติจากการเช็คชื่อ · ปีการศึกษา {year.year} · เกณฑ์ผ่าน ≥ {Math.round(PASS_MIN_RATIO * 100)}%
           </p>
         </div>
-        <SubjectSwitcher subjects={subjects} current={subject.id} />
+        <SectionSwitcher sections={sections} current={section.id} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -49,12 +49,12 @@ export default async function ResultsPage({
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState title="ยังไม่มีนักเรียนในวิชานี้" hint="จัดนักเรียนเข้าวิชาก่อน" />
+        <EmptyState title="ยังไม่มีนักเรียนในกลุ่มนี้" hint="จัดนักเรียนเข้ากลุ่มนี้ก่อน" />
       ) : (
         <Card>
           <CardHeader
             icon={<GraduationCap className="size-4.5" strokeWidth={1.8} />}
-            title={`${subject.code} — ${subject.name}`}
+            title={`${section.subjectCode} — ${section.subjectName} · ${section.name}`}
             action={<Badge tone="navy">{rows.length} คน</Badge>}
           />
           <div className="overflow-x-auto">

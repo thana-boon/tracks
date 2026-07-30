@@ -1,95 +1,65 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db';
-import { attendance, people, registrations } from '@/db/schema';
+import { attendance, subjectDates, subjectSections } from '@/db/schema';
 import { requireRole } from '@/lib/authz';
 import { actorOf } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { logActivity } from '@/lib/log';
 import { normalizeYmd } from '@/lib/utils';
+import { dayRoster, type DayRosterEntry } from '@/lib/data';
+import { sectionsOnDate, type SectionOnDay } from '@/lib/subjects-for-user';
 import type { ActionResult } from '@/components/action-button';
 
+const SlotRecords = z
+  .array(z.object({ studentId: z.number().int().positive(), present: z.boolean() }))
+  .nullable();
+
 const SaveInput = z.object({
-  subjectId: z.number().int().positive(),
+  sectionId: z.number().int().positive(),
   date: z.string(),
-  slot: z.enum(['morning', 'afternoon']),
-  records: z.array(z.object({ studentId: z.number().int().positive(), present: z.boolean() })),
+  /** null = this slot was not checked; it stays unrecorded */
+  morning: SlotRecords,
+  afternoon: SlotRecords,
 });
 
-/** Assigned students of a subject with their presence for one date+slot. */
-export interface RosterEntry {
-  studentId: number;
-  code: string;
-  fullName: string;
-  nickname: string | null;
-  gradeLevel: string | null;
-  classroom: string | null;
-  /** null = not yet recorded for this slot */
-  present: boolean | null;
+/** The รอบเรียน meeting on one date — step 2 of the check-in flow. */
+export async function loadSectionsOnDate(
+  date: string,
+): Promise<{ ok: boolean; message?: string; sections: SectionOnDay[] }> {
+  await requireRole('admin', 'teacher');
+  const year = await activeYear();
+  if (!year) return { ok: false, message: 'ยังไม่ได้ซิงก์ปีการศึกษา', sections: [] };
+  const ymd = normalizeYmd(date);
+  if (!ymd) return { ok: false, message: 'วันที่ไม่ถูกต้อง', sections: [] };
+  return { ok: true, sections: await sectionsOnDate(year, ymd) };
 }
 
-export async function loadRoster(
-  subjectId: number,
+/** The roster for one section on one class day, both slots at once. */
+export async function loadDayRoster(
+  sectionId: number,
   date: string,
-  slot: 'morning' | 'afternoon',
-): Promise<{ ok: boolean; message?: string; roster: RosterEntry[] }> {
+): Promise<{ ok: boolean; message?: string; roster: DayRosterEntry[] }> {
   await requireRole('admin', 'teacher');
   const year = await activeYear();
   if (!year) return { ok: false, message: 'ยังไม่ได้ซิงก์ปีการศึกษา', roster: [] };
   const ymd = normalizeYmd(date);
   if (!ymd) return { ok: false, message: 'วันที่ไม่ถูกต้อง', roster: [] };
 
-  const students = await db
-    .select({
-      studentId: people.id,
-      code: people.code,
-      fullName: people.fullName,
-      nickname: people.nickname,
-      gradeLevel: people.gradeLevel,
-      classroom: people.classroom,
-      classNumber: people.classNumber,
-    })
-    .from(registrations)
-    .innerJoin(people, eq(registrations.studentId, people.id))
-    .where(
-      and(
-        eq(registrations.subjectId, subjectId),
-        eq(registrations.yearId, year.id),
-        isNull(registrations.droppedAt),
-      ),
-    )
-    .orderBy(people.gradeLevel, people.classroom, people.classNumber, people.code);
-
-  const existing = await db
-    .select({ studentId: attendance.studentId, present: attendance.present })
-    .from(attendance)
-    .where(
-      and(
-        eq(attendance.subjectId, subjectId),
-        eq(attendance.yearId, year.id),
-        eq(attendance.date, ymd),
-        eq(attendance.slot, slot),
-      ),
-    );
-  const presenceBy = new Map(existing.map((e) => [e.studentId, e.present]));
-
-  const roster: RosterEntry[] = students.map((s) => ({
-    studentId: s.studentId,
-    code: s.code,
-    fullName: s.fullName,
-    nickname: s.nickname,
-    gradeLevel: s.gradeLevel,
-    classroom: s.classroom,
-    present: presenceBy.has(s.studentId) ? presenceBy.get(s.studentId)! : null,
-  }));
-  return { ok: true, roster };
+  return { ok: true, roster: await dayRoster(sectionId, ymd) };
 }
 
-/** Upsert attendance for one subject/date/slot. Overwrites prior records. */
-export async function saveAttendance(input: z.infer<typeof SaveInput>): Promise<ActionResult> {
+/**
+ * Upsert one class day's attendance — morning, afternoon, or both in a single
+ * write. A slot passed as null is left alone, so saving the morning does not
+ * wipe an afternoon recorded earlier (or vice versa).
+ */
+export async function saveDayAttendance(
+  input: z.infer<typeof SaveInput>,
+): Promise<ActionResult> {
   const user = await requireRole('admin', 'teacher');
   const parsed = SaveInput.safeParse(input);
   if (!parsed.success) return { ok: false, message: 'ข้อมูลไม่ถูกต้อง' };
@@ -98,41 +68,65 @@ export async function saveAttendance(input: z.infer<typeof SaveInput>): Promise<
   const ymd = normalizeYmd(parsed.data.date);
   if (!ymd) return { ok: false, message: 'วันที่ไม่ถูกต้อง' };
 
-  const { subjectId, slot, records } = parsed.data;
-  if (records.length === 0) return { ok: false, message: 'ยังไม่มีนักเรียนให้บันทึก' };
+  const { sectionId, morning, afternoon } = parsed.data;
+  if (!morning && !afternoon) return { ok: false, message: 'ยังไม่ได้เช็คช่วงใดเลย' };
+  if (morning?.length === 0 || afternoon?.length === 0)
+    return { ok: false, message: 'ยังไม่มีนักเรียนให้บันทึก' };
+
+  // The date must be one this section actually meets on — the check-in screen
+  // only offers scheduled days, so anything else is a stale or forged submit.
+  const [scheduled] = await db
+    .select({ subjectId: subjectSections.subjectId })
+    .from(subjectDates)
+    .innerJoin(subjectSections, eq(subjectDates.sectionId, subjectSections.id))
+    .where(
+      and(
+        eq(subjectDates.sectionId, sectionId),
+        eq(subjectDates.date, ymd),
+        eq(subjectSections.yearId, year.id),
+      ),
+    )
+    .limit(1);
+  if (!scheduled) return { ok: false, message: 'กลุ่มนี้ไม่ได้เรียนในวันที่เลือก' };
 
   const actor = actorOf(user);
+  const slots: ['morning' | 'afternoon', { studentId: number; present: boolean }[]][] = [];
+  if (morning) slots.push(['morning', morning]);
+  if (afternoon) slots.push(['afternoon', afternoon]);
+
   await db.transaction(async (tx) => {
-    for (const r of records) {
-      await tx
-        .insert(attendance)
-        .values({
-          yearId: year.id,
-          subjectId,
-          studentId: r.studentId,
-          date: ymd,
-          slot,
-          present: r.present,
-          recordedBy: actor,
-        })
-        .onConflictDoUpdate({
-          target: [attendance.subjectId, attendance.date, attendance.slot, attendance.studentId],
-          set: { present: r.present, recordedBy: actor, recordedAt: new Date() },
-        });
+    for (const [slot, records] of slots) {
+      for (const r of records) {
+        await tx
+          .insert(attendance)
+          .values({
+            yearId: year.id,
+            subjectId: scheduled.subjectId,
+            sectionId,
+            studentId: r.studentId,
+            date: ymd,
+            slot,
+            present: r.present,
+            recordedBy: actor,
+          })
+          .onConflictDoUpdate({
+            target: [attendance.sectionId, attendance.date, attendance.slot, attendance.studentId],
+            set: { present: r.present, recordedBy: actor, recordedAt: new Date() },
+          });
+      }
     }
   });
 
-  const presentCount = records.filter((r) => r.present).length;
-  await logActivity(user, 'save_attendance', `subject:${subjectId}`, {
+  const parts = slots.map(
+    ([slot, records]) =>
+      `${slot === 'morning' ? 'เช้า' : 'บ่าย'} ${records.filter((r) => r.present).length}/${records.length}`,
+  );
+  await logActivity(user, 'save_attendance', `section:${sectionId}`, {
     date: ymd,
-    slot,
-    present: presentCount,
-    total: records.length,
+    slots: slots.map(([slot]) => slot),
+    total: slots[0]?.[1].length ?? 0,
   });
   revalidatePath('/attendance');
   revalidatePath('/attendance/view');
-  return {
-    ok: true,
-    message: `บันทึกเช็คชื่อแล้ว: มา ${presentCount}/${records.length} คน`,
-  };
+  return { ok: true, message: `บันทึกเช็คชื่อแล้ว — มา ${parts.join(' · ')} คน` };
 }

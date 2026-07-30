@@ -231,7 +231,7 @@ function SubjectForm({
           <Label htmlFor="s-name">ชื่อวิชา</Label>
           <Input id="s-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น การตัดต่อวิดีโอ" />
         </div>
-        <div>
+                <div>
           <Label htmlFor="s-desc">คำอธิบาย (ไม่บังคับ)</Label>
           <Textarea id="s-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>

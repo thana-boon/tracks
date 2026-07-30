@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ClipboardCheck, Eye, Printer, GraduationCap, Users, ArrowUpRight } from 'lucide-react';
+import { ClipboardCheck, GraduationCap, Users, ArrowUpRight } from 'lucide-react';
 import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { db } from '@/db';
@@ -11,8 +11,6 @@ export const metadata = { title: 'ภาพรวมครู · Track' };
 
 const tiles = [
   { href: '/attendance', title: 'เช็คชื่อ', desc: 'บันทึกการเข้าเรียน เช้า/บ่าย', icon: ClipboardCheck, tone: 'primary' },
-  { href: '/attendance/view', title: 'ผลเช็คชื่อ', desc: 'สรุปการเข้าเรียนรายวิชา', icon: Eye, tone: 'navy' },
-  { href: '/attendance/print', title: 'พิมพ์ใบเช็คชื่อ', desc: 'ใบเช็คชื่อเปล่าสำหรับพิมพ์', icon: Printer, tone: 'navy' },
   { href: '/results', title: 'ผลการเรียน', desc: 'ผ่าน/ไม่ผ่าน จากการเช็คชื่อ', icon: GraduationCap, tone: 'accent' },
 ] as const;
 
@@ -69,7 +67,7 @@ export default async function TeacherHome() {
         })}
         {homeroomCount > 0 ? (
           <Link
-            href="/teacher/homeroom"
+            href="/homeroom"
             style={{ ['--i' as string]: tiles.length }}
             className="group flex items-center gap-4 rounded-2xl border border-border bg-card p-4 shadow-xs transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-md"
           >

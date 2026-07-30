@@ -1,135 +1,165 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
 import { Users } from 'lucide-react';
-import { db } from '@/db';
-import { homerooms, people } from '@/db/schema';
 import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { buildTranscripts } from '@/lib/transcript';
+import { listHomerooms, studentsByRoom, type Homeroom } from '@/lib/homeroom';
+import { classDaysOfYear } from '@/lib/subjects-for-user';
 import { Card, CardHeader, Badge, EmptyState, NeedYear, resultTone } from '@/components/ui';
 import { OVERALL_LABEL } from '@/lib/evaluate';
+import { RoomPicker } from './room-picker';
 
 export const metadata = { title: 'ห้องที่ปรึกษา · Track' };
 
-export default async function HomeroomPage() {
-  const user = await requireRole('teacher');
+/**
+ * ห้องที่ปรึกษา — ครูเห็นเฉพาะห้องของตัวเอง, admin เห็นทุกห้องและเลือกได้ว่าจะดู
+ * ห้องไหน (หลายห้องพร้อมกันก็ได้) พร้อมปุ่มออกรายงาน PDF.
+ */
+export default async function HomeroomPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ rooms?: string }>;
+}) {
+  const user = await requireRole('admin', 'teacher');
   const year = await activeYear();
   if (!year) return <NeedYear />;
 
-  if (!user.personId)
+  const isAdmin = user.role === 'admin';
+  if (!isAdmin && !user.personId)
     return <EmptyState title="ไม่พบข้อมูลครู" hint="ต้องซิงก์รายชื่อครูก่อน — ติดต่อผู้ดูแล" />;
 
-  const rooms = await db
-    .select({ gradeLevel: homerooms.gradeLevel, classroom: homerooms.classroom })
-    .from(homerooms)
-    .where(and(eq(homerooms.yearId, year.id), eq(homerooms.teacherId, user.personId)))
-    .orderBy(asc(homerooms.gradeLevel), asc(homerooms.classroom));
+  const rooms = await listHomerooms(year, isAdmin ? undefined : user.personId!);
 
   if (rooms.length === 0)
     return (
       <div className="space-y-6">
-        <Header />
+        <Header isAdmin={isAdmin} />
         <EmptyState
           icon={<Users className="size-8" strokeWidth={1.5} />}
-          title="คุณยังไม่ได้เป็นครูที่ปรึกษาห้องใด"
+          title={isAdmin ? 'ยังไม่มีห้องที่ปรึกษาในปีนี้' : 'คุณยังไม่ได้เป็นครูที่ปรึกษาห้องใด'}
           hint="ระบบซิงก์ครูที่ปรึกษาจาก SchoolOS — หากคิดว่าผิดพลาด ติดต่อผู้ดูแล"
         />
       </div>
     );
 
-  // Collect students across all advised rooms, then build transcripts once.
-  const studentRows = await db
-    .select({ id: people.id, gradeLevel: people.gradeLevel, classroom: people.classroom })
-    .from(people)
-    .where(
-      and(
-        eq(people.type, 'student'),
-        eq(people.status, 'studying'),
-        inArray(
-          people.gradeLevel,
-          rooms.map((r) => r.gradeLevel),
-        ),
-      ),
+  // A teacher always sees every room they advise; an admin sees what they tick,
+  // defaulting to the first room so the page never loads the whole school.
+  const sp = await searchParams;
+  let shown: Homeroom[] = rooms;
+  let selected: string[] = rooms.map((r) => r.key);
+  if (isAdmin) {
+    const asked = new Set(
+      (sp.rooms ?? '')
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean),
     );
-
-  const roomKey = new Set(rooms.map((r) => `${r.gradeLevel}|${r.classroom}`));
-  const mine = studentRows.filter((s) => roomKey.has(`${s.gradeLevel}|${s.classroom}`));
-  const transcripts = await buildTranscripts(year, mine.map((s) => s.id));
-
-  // Group transcripts by room.
-  const byRoom = new Map<string, typeof transcripts>();
-  for (const t of transcripts) {
-    const key = `${t.student.gradeLevel}|${t.student.classroom}`;
-    const arr = byRoom.get(key) ?? [];
-    arr.push(t);
-    byRoom.set(key, arr);
+    shown = sp.rooms === undefined ? rooms.slice(0, 1) : rooms.filter((r) => asked.has(r.key));
+    selected = shown.map((r) => r.key);
   }
+
+  const byRoom = await studentsByRoom(shown);
+  const [transcripts, classDays] = await Promise.all([
+    buildTranscripts(year, [...byRoom.values()].flat()),
+    isAdmin ? classDaysOfYear(year) : Promise.resolve([]),
+  ]);
+  const transcriptBy = new Map(transcripts.map((t) => [t.student.id, t]));
+  const months = [...new Set(classDays.map((d) => d.date.slice(0, 7)))];
 
   return (
     <div className="space-y-6">
-      <Header />
-      {rooms.map((room) => {
-        const key = `${room.gradeLevel}|${room.classroom}`;
-        const list = byRoom.get(key) ?? [];
-        return (
-          <Card key={key}>
-            <CardHeader
-              icon={<Users className="size-4.5" strokeWidth={1.8} />}
-              title={`ห้อง ${room.gradeLevel}/${room.classroom}`}
-              action={<Badge tone="navy">{list.length} คน</Badge>}
-            />
-            {list.length === 0 ? (
-              <div className="px-4 pb-5 sm:px-5">
-                <EmptyState title="ไม่มีนักเรียนในห้องนี้" />
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-xs text-muted-foreground">
-                      <th className="px-4 py-2.5 text-left font-medium">นักเรียน</th>
-                      <th className="px-4 py-2.5 text-left font-medium">วิชาเสริม · ผลการเรียน</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {list.map((t) => (
-                      <tr key={t.student.id} className="hover:bg-secondary/40">
-                        <td className="px-4 py-2.5 align-top">
-                          <p className="truncate font-medium">{t.student.fullName}</p>
-                          <p className="text-xs text-muted-foreground tabular-nums">{t.student.code}</p>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {t.lines.length === 0 ? (
-                            <span className="text-xs text-muted-foreground">ยังไม่ได้ลงวิชาเสริม</span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1.5">
-                              {t.lines.map((l, i) => (
-                                <span key={i} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1 text-xs">
-                                  <span className="font-medium">{l.subjectCode}</span>
-                                  <Badge tone={resultTone(l.overall)}>{OVERALL_LABEL[l.overall]}</Badge>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
+      <Header isAdmin={isAdmin} />
+      {isAdmin ? <RoomPicker rooms={rooms} selected={selected} months={months} /> : null}
+
+      {shown.length === 0 ? (
+        <EmptyState
+          icon={<Users className="size-8" strokeWidth={1.5} />}
+          title="ยังไม่ได้เลือกห้อง"
+          hint="เลือกห้องด้านบนเพื่อดูรายชื่อนักเรียน หรือกดออกรายงานเป็น PDF"
+        />
+      ) : (
+        shown.map((room) => {
+          const list = (byRoom.get(room.key) ?? [])
+            .map((id) => transcriptBy.get(id))
+            .filter((t): t is NonNullable<typeof t> => Boolean(t));
+          return (
+            <Card key={room.key}>
+              <CardHeader
+                icon={<Users className="size-4.5" strokeWidth={1.8} />}
+                title={`ห้อง ${room.key}`}
+                action={
+                  <div className="flex items-center gap-2">
+                    {room.teacherNames.length > 0 ? (
+                      <span className="hidden text-xs text-muted-foreground sm:inline">
+                        ครู {room.teacherNames.join(', ')}
+                      </span>
+                    ) : null}
+                    <Badge tone="navy">{list.length} คน</Badge>
+                  </div>
+                }
+              />
+              {list.length === 0 ? (
+                <div className="px-4 pb-5 sm:px-5">
+                  <EmptyState title="ไม่มีนักเรียนในห้องนี้" />
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-xs text-muted-foreground">
+                        <th className="px-4 py-2.5 text-left font-medium">นักเรียน</th>
+                        <th className="px-4 py-2.5 text-left font-medium">วิชาเสริม · ผลการเรียน</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-        );
-      })}
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {list.map((t) => (
+                        <tr key={t.student.id} className="hover:bg-secondary/40">
+                          <td className="px-4 py-2.5 align-top">
+                            <p className="truncate font-medium">{t.student.fullName}</p>
+                            <p className="text-xs text-muted-foreground tabular-nums">
+                              {t.student.code}
+                            </p>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            {t.lines.length === 0 ? (
+                              <span className="text-xs text-muted-foreground">ยังไม่ได้ลงวิชาเสริม</span>
+                            ) : (
+                              <div className="flex flex-wrap gap-1.5">
+                                {t.lines.map((l, i) => (
+                                  <span
+                                    key={i}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1 text-xs"
+                                  >
+                                    <span className="font-medium">{l.subjectCode}</span>
+                                    <Badge tone={resultTone(l.overall)}>
+                                      {OVERALL_LABEL[l.overall]}
+                                    </Badge>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          );
+        })
+      )}
     </div>
   );
 }
 
-function Header() {
+function Header({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">ห้องที่ปรึกษา</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        ดูว่านักเรียนในห้องที่ปรึกษาของคุณเรียนวิชาเสริมอะไร และผ่าน/ไม่ผ่าน — อ่านอย่างเดียว
+        {isAdmin
+          ? 'เลือกห้องที่ต้องการ (เลือกได้หลายห้อง) เพื่อดูว่านักเรียนเรียนวิชาเสริมอะไรและผ่าน/ไม่ผ่าน — หรือกดออกรายงานเป็น PDF'
+          : 'ดูว่านักเรียนในห้องที่ปรึกษาของคุณเรียนวิชาเสริมอะไร และผ่าน/ไม่ผ่าน — อ่านอย่างเดียว'}
       </p>
     </div>
   );

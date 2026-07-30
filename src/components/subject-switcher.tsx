@@ -3,19 +3,24 @@
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Select } from './ui';
 
-export interface SwitchSubject {
+export interface SwitchSection {
   id: number;
-  code: string;
   name: string;
+  subjectCode: string;
+  subjectName: string;
   groupCode: string;
 }
 
-/** A subject dropdown that reflects the current `?subject=` and navigates on change. */
-export function SubjectSwitcher({
-  subjects,
+/**
+ * A รอบเรียน dropdown that reflects the current `?section=` and navigates on
+ * change. Two รอบ of one วิชา differ only by their name, so the name is always
+ * part of the label.
+ */
+export function SectionSwitcher({
+  sections,
   current,
 }: {
-  subjects: SwitchSubject[];
+  sections: SwitchSection[];
   current: number | null;
 }) {
   const router = useRouter();
@@ -24,19 +29,15 @@ export function SubjectSwitcher({
 
   function go(id: string) {
     const next = new URLSearchParams(params);
-    next.set('subject', id);
+    next.set('section', id);
     router.push(`${pathname}?${next.toString()}`);
   }
 
   return (
-    <Select
-      value={current ?? ''}
-      onChange={(e) => go(e.target.value)}
-      className="h-10 max-w-md"
-    >
-      {subjects.map((s) => (
+    <Select value={current ?? ''} onChange={(e) => go(e.target.value)} className="h-10 max-w-md">
+      {sections.map((s) => (
         <option key={s.id} value={s.id}>
-          {s.groupCode} · {s.code} — {s.name}
+          {s.groupCode} · {s.subjectCode} — {s.subjectName} ({s.name})
         </option>
       ))}
     </Select>

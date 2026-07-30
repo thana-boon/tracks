@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  dayOutcome,
   evaluateSubject,
   heldDates,
   type AttendanceRecord,
@@ -73,16 +74,36 @@ test('only one slot held: present in it → excellent (not penalised)', () => {
   assert.equal(e.overall, 'excellent');
 });
 
-test('meeting-day filter drops stray dates', () => {
-  // Subject meets on Monday (1). The Tuesday record must be ignored.
+test('schedule filter drops dates the subject does not meet on', () => {
+  // Subject is scheduled for 1 June only. The 2 June record must be ignored.
   const records = [
-    rec('2026-06-01', 'morning', 1, true), // Monday
-    rec('2026-06-02', 'morning', 1, false), // Tuesday — stray
+    rec('2026-06-01', 'morning', 1, true),
+    rec('2026-06-02', 'morning', 1, false), // stray
   ];
-  assert.deepEqual(heldDates(records, [1]), ['2026-06-01']);
-  const e = evaluateSubject(1, records, [1]);
+  assert.deepEqual(heldDates(records, ['2026-06-01']), ['2026-06-01']);
+  const e = evaluateSubject(1, records, ['2026-06-01']);
   assert.equal(e.totalDays, 1);
   assert.equal(e.overall, 'excellent');
+});
+
+test('a scheduled date nobody checked is not held and costs nothing', () => {
+  const records = [
+    rec('2026-06-01', 'morning', 1, true),
+    rec('2026-06-01', 'afternoon', 1, true),
+  ];
+  const e = evaluateSubject(1, records, ['2026-06-01', '2026-06-08']);
+  assert.equal(e.totalDays, 1);
+  assert.equal(e.overall, 'excellent');
+});
+
+test('day outcome: full day ยอดเยี่ยม, half day ผ่าน, absent ไม่ผ่าน', () => {
+  assert.equal(dayOutcome(true, true), 'excellent');
+  assert.equal(dayOutcome(true, false), 'partial');
+  assert.equal(dayOutcome(false, true), 'partial');
+  assert.equal(dayOutcome(false, false), 'absent');
+  // Only one slot checked at all: present in it is a full day.
+  assert.equal(dayOutcome(true, null), 'excellent');
+  assert.equal(dayOutcome(null, false), 'absent');
 });
 
 test('60% attendance threshold: 3 of 5 days attended → pass', () => {

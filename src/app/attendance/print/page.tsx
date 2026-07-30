@@ -1,37 +1,71 @@
 import { Printer } from 'lucide-react';
+import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
-import { listSubjects } from '@/lib/data';
+import {
+  listSections,
+  classDatesBySection,
+  studentCountsBySection,
+} from '@/lib/data';
 import { NeedYear, EmptyState } from '@/components/ui';
-import { PrintPanel } from './print-panel';
+import { PrintPanel, type PrintSection } from './print-panel';
 
 export const metadata = { title: 'พิมพ์ใบเช็คชื่อ · Track' };
 
 export default async function AttendancePrintPage({
   searchParams,
 }: {
-  searchParams: Promise<{ subject?: string }>;
+  searchParams: Promise<{ section?: string }>;
 }) {
+  // Printing blank sheets is an admin job — the attendance layout lets teachers
+  // in, so this page guards itself and bounces them to their own dashboard.
+  await requireRole('admin');
+
   const year = await activeYear();
   if (!year) return <NeedYear />;
 
-  const subjects = await listSubjects(true);
-  if (subjects.length === 0)
+  const [sections, datesBy, countBy] = await Promise.all([
+    listSections(year.id),
+    classDatesBySection(year.id),
+    studentCountsBySection(year.id),
+  ]);
+
+  if (sections.length === 0)
     return (
-      <EmptyState icon={<Printer className="size-8" strokeWidth={1.5} />} title="ยังไม่มีวิชาเสริม" hint="เพิ่มวิชาก่อน" />
+      <EmptyState
+        icon={<Printer className="size-8" strokeWidth={1.5} />}
+        title="ยังไม่มีกลุ่มเรียน"
+        hint="จัดนักเรียนเข้าวิชาก่อน จึงจะพิมพ์ใบเช็คชื่อได้"
+      />
     );
 
+  const items: PrintSection[] = sections.map((s) => ({
+    id: s.id,
+    name: s.name,
+    subjectCode: s.subjectCode,
+    subjectName: s.subjectName,
+    groupCode: s.groupCode,
+    groupName: s.groupName,
+    room: s.room,
+    studentCount: countBy.get(s.id) ?? 0,
+    classDates: datesBy.get(s.id) ?? [],
+  }));
+
+  // A ?section= link (from ผลเช็คชื่อ) pre-ticks that one; otherwise start empty
+  // so nothing is printed by accident.
   const sp = await searchParams;
-  const current = sp.subject ? Number(sp.subject) : subjects[0].id;
+  const asked = Number(sp.section);
+  const current = items.some((s) => s.id === asked) ? [asked] : [];
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">พิมพ์ใบเช็คชื่อ</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          สร้างใบเช็คชื่อเปล่าสำหรับวิชา · ปีการศึกษา {year.year} — เปิดเป็น PDF แล้วสั่งพิมพ์
+          ใบเช็คชื่อเปล่า A4 แนวตั้ง หน้าละ 1 กลุ่มเรียน · ปีการศึกษา {year.year} —
+          เลือกได้หลายกลุ่มพร้อมกัน แล้วเปิดเป็น PDF สั่งพิมพ์
         </p>
       </div>
-      <PrintPanel subjects={subjects} current={subjects.some((s) => s.id === current) ? current : subjects[0].id} />
+      <PrintPanel sections={items} current={current} />
     </div>
   );
 }

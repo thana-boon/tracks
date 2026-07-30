@@ -76,6 +76,14 @@ export function thaiDateLong(ymd: string | null | undefined): string {
   return `${Number(d)} ${month} ${Number(y) + 543}`;
 }
 
+/** "มกราคม 2569" from a "YYYY-MM" month key. */
+export function thaiMonthLabel(ym: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(ym ?? '').trim());
+  if (!m) return '';
+  const month = THAI_MONTHS[Number(m[2]) - 1];
+  return month ? `${month} ${Number(m[1]) + 543}` : '';
+}
+
 /** "27 ม.ค. 69" — compact form for table headers. */
 export function thaiDateShort(ymd: string | null | undefined): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd ?? '').trim());
@@ -104,6 +112,26 @@ export function weekdayOfYmd(ymd: string): number {
   if (!m) return -1;
   const [, y, mo, d] = m.map(Number);
   return new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
+}
+
+/** "YYYY-MM-DD" from calendar parts (month is 1-12). */
+export function ymd(year: number, month: number, day: number): string {
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${p(year, 4)}-${p(month)}-${p(day)}`;
+}
+
+/**
+ * Days in a month grid: every date of the month, preceded by the blanks needed
+ * to line the 1st up under its weekday column. Used by the Thai calendar.
+ */
+export function monthGrid(year: number, month: number): (string | null)[] {
+  const first = new Date(Date.UTC(year, month - 1, 1));
+  const lead = first.getUTCDay();
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return [
+    ...Array.from({ length: lead }, () => null),
+    ...Array.from({ length: days }, (_, i) => ymd(year, month, i + 1)),
+  ];
 }
 
 /** Today as "YYYY-MM-DD" in school time. */

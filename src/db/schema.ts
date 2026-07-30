@@ -7,7 +7,6 @@ import {
   pgEnum,
   pgTable,
   serial,
-  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -133,12 +132,13 @@ export const trackSubjects = pgTable(
   ],
 );
 
-// ── meeting days-of-week per subject per year ────────────────
-// 0 = Sunday … 6 = Saturday. Set when the subject is used in a year (during
-// assignment); attendance evaluation counts only checked dates falling on
-// these weekdays.
-export const subjectDays = pgTable(
-  'subject_days',
+// ── รอบเรียน: one running of a subject in a year ─────────────
+// The same วิชา is taught more than once — to a different กลุ่ม, in a different
+// room, on different days. A section is that one running; everything that
+// varies between runnings (days, room, students, attendance) hangs off it,
+// while track_subjects stays the catalogue entry (code, name, teacher).
+export const subjectSections = pgTable(
+  'subject_sections',
   {
     id: serial('id').primaryKey(),
     subjectId: integer('subject_id')
@@ -147,9 +147,39 @@ export const subjectDays = pgTable(
     yearId: integer('year_id')
       .notNull()
       .references(() => academicYears.id, { onDelete: 'cascade' }),
-    dayOfWeek: smallint('day_of_week').notNull(),
+    /** what tells two runnings apart — "กลุ่ม 1", "รอบบ่าย ม.5" */
+    name: text('name').notNull(),
+    /** ห้องที่ใช้เรียน — free text ("อาคาร 3 ห้อง 312") */
+    room: text('room'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('subject_days_uq').on(t.subjectId, t.yearId, t.dayOfWeek)],
+  (t) => [
+    uniqueIndex('subject_sections_uq').on(t.subjectId, t.yearId, t.name),
+    index('subject_sections_year_idx').on(t.yearId, t.subjectId),
+  ],
+);
+
+// ── class dates per section ──────────────────────────────────
+// The calendar days a section actually meets, picked one by one on the
+// assignment screen — a รอบเรียน runs on a handful of named days (often one,
+// sometimes three or four), not on a repeating weekday. These rows are the
+// schedule: the check-in screen offers only these dates, and evaluation counts
+// only these dates.
+export const subjectDates = pgTable(
+  'subject_dates',
+  {
+    id: serial('id').primaryKey(),
+    sectionId: integer('section_id')
+      .notNull()
+      .references(() => subjectSections.id, { onDelete: 'cascade' }),
+    /** class date, YYYY-MM-DD (school time) */
+    date: date('date').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('subject_dates_uq').on(t.sectionId, t.date),
+    index('subject_dates_date_idx').on(t.date),
+  ],
 );
 
 // ── custom classrooms (ห้องเรียนใหม่ที่ระบบนี้สร้างเอง) ──────
@@ -198,6 +228,10 @@ export const registrations = pgTable(
     subjectId: integer('subject_id')
       .notNull()
       .references(() => trackSubjects.id, { onDelete: 'restrict' }),
+    /** which running of the subject — the roster the student actually sits in */
+    sectionId: integer('section_id')
+      .notNull()
+      .references(() => subjectSections.id, { onDelete: 'restrict' }),
     studentId: integer('student_id')
       .notNull()
       .references(() => people.id, { onDelete: 'restrict' }),
@@ -208,6 +242,7 @@ export const registrations = pgTable(
   },
   (t) => [
     index('registrations_year_subject_idx').on(t.yearId, t.subjectId),
+    index('registrations_section_idx').on(t.sectionId),
     index('registrations_student_idx').on(t.studentId),
   ],
 );
@@ -223,6 +258,10 @@ export const attendance = pgTable(
     subjectId: integer('subject_id')
       .notNull()
       .references(() => trackSubjects.id, { onDelete: 'restrict' }),
+    /** two sections of one subject can meet the same day — the key is per section */
+    sectionId: integer('section_id')
+      .notNull()
+      .references(() => subjectSections.id, { onDelete: 'restrict' }),
     studentId: integer('student_id')
       .notNull()
       .references(() => people.id, { onDelete: 'restrict' }),
@@ -234,7 +273,8 @@ export const attendance = pgTable(
     recordedAt: timestamp('recorded_at').notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('attendance_uq').on(t.subjectId, t.date, t.slot, t.studentId),
+    uniqueIndex('attendance_uq').on(t.sectionId, t.date, t.slot, t.studentId),
+    index('attendance_section_idx').on(t.sectionId),
     index('attendance_subject_year_idx').on(t.subjectId, t.yearId),
     index('attendance_student_idx').on(t.studentId),
   ],

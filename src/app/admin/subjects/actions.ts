@@ -19,7 +19,13 @@ const SubjectInput = z.object({
 
 export async function saveSubject(
   id: number | null,
-  form: { groupId: number; code: string; name: string; teacherName: string; description: string },
+  form: {
+    groupId: number;
+    code: string;
+    name: string;
+    teacherName: string;
+    description: string;
+  },
 ): Promise<ActionResult> {
   const user = await requireRole('admin');
   const parsed = SubjectInput.safeParse(form);

@@ -7,13 +7,14 @@
  *
  * Model
  * ─────
- * A subject meets on fixed weekdays (subject_days). Each class date has two
- * slots: morning and afternoon. A slot on a date counts as "held" when at
- * least one attendance record exists for it — a slot the teacher never
- * checked is not held and cannot count against anyone.
+ * A subject meets on named calendar dates (subject_dates) — one day, or three
+ * or four, chosen when the subject is set up. Each class date has two slots:
+ * morning and afternoon. A slot on a date counts as "held" when at least one
+ * attendance record exists for it — a slot the teacher never checked is not
+ * held and cannot count against anyone.
  *
  * Per held date, per student (spec table):
- *   present in every held slot          → excellent  (มาตรง — ยอดเยี่ยม)
+ *   present in every held slot          → excellent  (มาเต็มวัน — ยอดเยี่ยม)
  *   present in some but not every slot  → partial    (มาครึ่งวัน — ผ่าน)
  *   present in none                     → absent     (ไม่มาเลย — ไม่ผ่าน)
  *
@@ -42,10 +43,29 @@ export type OverallResult = 'excellent' | 'pass' | 'fail' | 'pending';
 export const PASS_MIN_RATIO = 0.6;
 
 export const DAY_RESULT_LABEL: Record<DayResult, string> = {
-  excellent: 'มาตรง',
+  excellent: 'มาเต็มวัน',
   partial: 'มาครึ่งวัน',
   absent: 'ไม่มา',
 };
+
+/**
+ * The grade a single class day earns once both slots have been checked — the
+ * wording the check-in screen shows back to the teacher. Same three buckets as
+ * DAY_RESULT_LABEL, phrased as the outcome rather than as the attendance.
+ */
+export const DAY_OUTCOME_LABEL: Record<DayResult, string> = {
+  excellent: 'ยอดเยี่ยม',
+  partial: 'ผ่าน',
+  absent: 'ไม่ผ่าน',
+};
+
+/** Day grade from one day's two slots; null = slot not checked. */
+export function dayOutcome(morning: boolean | null, afternoon: boolean | null): DayResult {
+  const slots = [morning, afternoon].filter((v) => v !== null) as boolean[];
+  if (slots.length === 0) return 'absent';
+  const attended = slots.filter(Boolean).length;
+  return attended === slots.length ? 'excellent' : attended > 0 ? 'partial' : 'absent';
+}
 
 export const OVERALL_LABEL: Record<OverallResult, string> = {
   excellent: 'ยอดเยี่ยม',
@@ -74,27 +94,21 @@ export interface SubjectEvaluation {
   overall: OverallResult;
 }
 
-/** Weekday index (0=Sun…6=Sat) of "YYYY-MM-DD", timezone-proof. */
-function weekday(ymd: string): number {
-  const [y, m, d] = ymd.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-}
-
 /**
- * Distinct held dates for a subject, sorted ascending. When the subject has
- * declared meeting weekdays, dates falling outside them are ignored (a stray
- * record on a wrong day must not change anyone's result); with no declared
- * days every checked date counts.
+ * Distinct held dates for a subject, sorted ascending. When the subject has a
+ * declared schedule, records on dates outside it are ignored (a stray record on
+ * a day the subject does not meet must not change anyone's result); with no
+ * declared schedule every checked date counts.
  */
 export function heldDates(
   records: Pick<AttendanceRecord, 'date'>[],
-  meetingDays?: number[],
+  scheduledDates?: string[],
 ): string[] {
   const filter =
-    meetingDays && meetingDays.length > 0 ? new Set(meetingDays) : null;
+    scheduledDates && scheduledDates.length > 0 ? new Set(scheduledDates) : null;
   const dates = new Set<string>();
   for (const r of records) {
-    if (filter && !filter.has(weekday(r.date))) continue;
+    if (filter && !filter.has(r.date)) continue;
     dates.add(r.date);
   }
   return [...dates].sort();
@@ -107,17 +121,17 @@ export function heldDates(
 export function evaluateSubject(
   studentId: number,
   allRecords: AttendanceRecord[],
-  meetingDays?: number[],
+  scheduledDates?: string[],
 ): SubjectEvaluation {
-  const dates = heldDates(allRecords, meetingDays);
+  const dates = heldDates(allRecords, scheduledDates);
   const filter =
-    meetingDays && meetingDays.length > 0 ? new Set(meetingDays) : null;
+    scheduledDates && scheduledDates.length > 0 ? new Set(scheduledDates) : null;
 
   // slot → held? and student presence, per date
   const held = new Map<string, Set<Slot>>();
   const mine = new Map<string, Map<Slot, boolean>>();
   for (const r of allRecords) {
-    if (filter && !filter.has(weekday(r.date))) continue;
+    if (filter && !filter.has(r.date)) continue;
     let slots = held.get(r.date);
     if (!slots) held.set(r.date, (slots = new Set()));
     slots.add(r.slot);

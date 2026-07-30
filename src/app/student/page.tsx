@@ -1,14 +1,14 @@
-import { BookOpen, CalendarClock } from 'lucide-react';
+import { BookOpen, CalendarClock, MapPin } from 'lucide-react';
 import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { buildTranscripts } from '@/lib/transcript';
-import { meetingDaysOf } from '@/lib/data';
+import { classDatesOf } from '@/lib/data';
 import { db } from '@/db';
-import { registrations, trackSubjects, trackGroups } from '@/db/schema';
+import { registrations, subjectSections, trackSubjects } from '@/db/schema';
 import { and, eq, isNull } from 'drizzle-orm';
 import { Card, CardHeader, Badge, EmptyState, NeedYear, resultTone } from '@/components/ui';
 import { OVERALL_LABEL, PASS_MIN_RATIO } from '@/lib/evaluate';
-import { THAI_WEEKDAYS } from '@/lib/utils';
+import { thaiDateShort } from '@/lib/utils';
 
 export const metadata = { title: 'วิชาเสริมของฉัน · Track' };
 
@@ -21,16 +21,18 @@ export default async function StudentHome() {
   const [transcript] = await buildTranscripts(year, [user.personId]);
   const lines = transcript?.lines ?? [];
 
-  // Meeting days per subject for display.
+  // Class days per section the student sits in, keyed the same way its
+  // transcript line is — two รอบ of one วิชา have different days.
   const regRows = await db
-    .select({ subjectId: trackSubjects.id, code: trackSubjects.code })
+    .select({ sectionId: registrations.sectionId, sectionName: subjectSections.name, code: trackSubjects.code })
     .from(registrations)
+    .innerJoin(subjectSections, eq(registrations.sectionId, subjectSections.id))
     .innerJoin(trackSubjects, eq(registrations.subjectId, trackSubjects.id))
     .where(and(eq(registrations.studentId, user.personId), eq(registrations.yearId, year.id), isNull(registrations.droppedAt)));
-  const daysByCode = new Map<string, number[]>();
+  const datesByLine = new Map<string, string[]>();
   await Promise.all(
     regRows.map(async (r) => {
-      daysByCode.set(r.code, await meetingDaysOf(r.subjectId, year.id));
+      datesByLine.set(`${r.code}|${r.sectionName}`, await classDatesOf(r.sectionId));
     }),
   );
 
@@ -54,7 +56,9 @@ export default async function StudentHome() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {lines.map((l, i) => {
-            const days = (daysByCode.get(l.subjectCode) ?? []).map((d) => THAI_WEEKDAYS[d]).filter(Boolean).join(', ');
+            const days = (datesByLine.get(`${l.subjectCode}|${l.sectionName}`) ?? [])
+              .map((d) => thaiDateShort(d))
+              .join(', ');
             return (
               <Card key={i} className="p-5">
                 <div className="flex items-start justify-between gap-3">
@@ -68,6 +72,9 @@ export default async function StudentHome() {
                 <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   {days ? (
                     <span className="flex items-center gap-1"><CalendarClock className="size-3.5" strokeWidth={1.8} /> {days}</span>
+                  ) : null}
+                  {l.room ? (
+                    <span className="flex items-center gap-1"><MapPin className="size-3.5" strokeWidth={1.8} /> {l.room}</span>
                   ) : null}
                   <span>เข้าเรียน {l.totalDays === 0 ? '—' : `${Math.round(l.attendedRatio * 100)}%`}</span>
                   <span>· เกณฑ์ผ่าน ≥ {Math.round(PASS_MIN_RATIO * 100)}%</span>

@@ -39,6 +39,7 @@ export function navFor(role: AppRole): NavItem[] {
       { href: '/attendance/view', label: 'ผลเช็คชื่อ', icon: <Eye className="size-5" strokeWidth={sw} /> },
       { href: '/attendance/print', label: 'พิมพ์ใบเช็คชื่อ', icon: <Printer className="size-5" strokeWidth={sw} /> },
       { href: '/results', label: 'ผลการเรียน', icon: <GraduationCap className="size-5" strokeWidth={sw} /> },
+      { href: '/homeroom', label: 'ห้องที่ปรึกษา', icon: <Users className="size-5" strokeWidth={sw} /> },
       { href: '/admin/transcript', label: 'ทรานสคริปต์', icon: <FileText className="size-5" strokeWidth={sw} /> },
       { href: '/admin/backup', label: 'สำรองข้อมูล', icon: <DatabaseBackup className="size-5" strokeWidth={sw} /> },
       { href: '/admin/logs', label: 'ประวัติการใช้งาน', icon: <ScrollText className="size-5" strokeWidth={sw} /> },
@@ -48,10 +49,8 @@ export function navFor(role: AppRole): NavItem[] {
     return [
       { href: '/teacher', label: 'ภาพรวม', icon: <LayoutDashboard className="size-5" strokeWidth={sw} /> },
       { href: '/attendance', label: 'เช็คชื่อ', icon: <ClipboardCheck className="size-5" strokeWidth={sw} /> },
-      { href: '/attendance/view', label: 'ผลเช็คชื่อ', icon: <Eye className="size-5" strokeWidth={sw} /> },
-      { href: '/attendance/print', label: 'พิมพ์ใบเช็คชื่อ', icon: <Printer className="size-5" strokeWidth={sw} /> },
       { href: '/results', label: 'ผลการเรียน', icon: <GraduationCap className="size-5" strokeWidth={sw} /> },
-      { href: '/teacher/homeroom', label: 'ห้องที่ปรึกษา', icon: <Users className="size-5" strokeWidth={sw} /> },
+      { href: '/homeroom', label: 'ห้องที่ปรึกษา', icon: <Users className="size-5" strokeWidth={sw} /> },
     ];
   }
   // student

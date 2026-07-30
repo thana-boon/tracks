@@ -7,7 +7,7 @@ import { SESSION_COOKIE } from '@/lib/session';
  * components via requireUser/requireRole — here we only check cookie presence
  * to keep the middleware edge-safe and fast.
  */
-const PROTECTED = ['/admin', '/teacher', '/student', '/attendance', '/results'];
+const PROTECTED = ['/admin', '/teacher', '/student', '/attendance', '/results', '/homeroom'];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -31,5 +31,6 @@ export const config = {
     '/student/:path*',
     '/attendance/:path*',
     '/results/:path*',
+    '/homeroom/:path*',
   ],
 };
