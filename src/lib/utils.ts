@@ -1,0 +1,123 @@
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+/** Thai grade ordering key: อนุบาล < ประถม < มัธยม, then by number. */
+export function gradeKey(g: string | null): number {
+  const m = /^(อ|ป|ม)\.?\s*(\d+)/.exec(g ?? '');
+  const order: Record<string, number> = { อ: 0, ป: 1, ม: 2 };
+  return m ? order[m[1]] * 100 + Number(m[2]) : 999;
+}
+
+/** Distinct, grade-ordered list of non-empty grade labels. */
+export function sortGrades(grades: (string | null)[]): string[] {
+  return [...new Set(grades.filter(Boolean) as string[])].sort(
+    (a, b) => gradeKey(a) - gradeKey(b),
+  );
+}
+
+/** The three grades this system serves — วิชาเสริมมีเฉพาะ ม.ปลาย. */
+export const TRACK_GRADES = ['ม.4', 'ม.5', 'ม.6'];
+
+/**
+ * Dates are entered and read back as local school time, so every conversion
+ * pins Asia/Bangkok explicitly rather than trusting the server's clock —
+ * containers run in UTC and would otherwise shift a class date by seven hours.
+ */
+export const SCHOOL_TZ = 'Asia/Bangkok';
+
+/** "YYYY-MM-DD" for a date, read in school time. */
+export function toSchoolDate(d: Date | null | undefined): string {
+  if (!d) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: SCHOOL_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+/** "HH:MM" (24h) for a date, read in school time. */
+export function toSchoolTime(d: Date | null | undefined): string {
+  if (!d) return '';
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: SCHOOL_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
+}
+
+export const THAI_MONTHS = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
+];
+
+/** 0 = อาทิตย์ … 6 = เสาร์ — matches JS getUTCDay(). */
+export const THAI_WEEKDAYS = [
+  'อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์',
+];
+export const THAI_WEEKDAYS_SHORT = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+
+/**
+ * "27 มกราคม 2569" from a plain calendar day ("YYYY-MM-DD"). Read as digits
+ * rather than through `new Date()` — parsing as a Date would place it at UTC
+ * midnight, the *previous* day in school time.
+ */
+export function thaiDateLong(ymd: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd ?? '').trim());
+  if (!m) return '';
+  const [, y, mo, d] = m;
+  const month = THAI_MONTHS[Number(mo) - 1];
+  if (!month) return '';
+  return `${Number(d)} ${month} ${Number(y) + 543}`;
+}
+
+/** "27 ม.ค. 69" — compact form for table headers. */
+export function thaiDateShort(ymd: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd ?? '').trim());
+  if (!m) return '';
+  const [, y, mo, d] = m;
+  const months = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  const month = months[Number(mo) - 1];
+  if (!month) return '';
+  return `${Number(d)} ${month} ${String(Number(y) + 543).slice(-2)}`;
+}
+
+/** "15 มกราคม 2569" for an instant, read in school time. */
+export function thaiDateLongOf(d: Date | null | undefined): string {
+  return thaiDateLong(toSchoolDate(d));
+}
+
+/** "15 มกราคม 2569 09:30" — the stamp printed in a document footer. */
+export function thaiDateTimeLongOf(d: Date | null | undefined): string {
+  const date = thaiDateLongOf(d);
+  return date ? `${date} ${toSchoolTime(d)}` : '';
+}
+
+/** Weekday index (0=Sun…6=Sat) of a "YYYY-MM-DD", timezone-proof. */
+export function weekdayOfYmd(ymd: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!m) return -1;
+  const [, y, mo, d] = m.map(Number);
+  return new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
+}
+
+/** Today as "YYYY-MM-DD" in school time. */
+export function todayYmd(): string {
+  return toSchoolDate(new Date());
+}
+
+/** Validate a "YYYY-MM-DD" string, returning it normalized or null. */
+export function normalizeYmd(input: string | null | undefined): string | null {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(input ?? '').trim());
+  if (!m) return null;
+  let [, y, mo, d] = m.map(Number);
+  if (y > 2400) y -= 543; // พ.ศ. → ค.ศ.
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${p(y, 4)}-${p(mo)}-${p(d)}`;
+}

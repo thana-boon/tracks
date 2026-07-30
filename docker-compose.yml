@@ -1,0 +1,76 @@
+# Track (วิชาเสริม ม.4-6) — app only. The database is NOT created here.
+#
+# This stack attaches to the school's EXISTING PostgreSQL container
+# (`postgres-core`, which already hosts the per-module databases) over the
+# shared external network `school-net`. We connect as the per-module role
+# `tracks` to the `tracks` database — nothing else on that server is touched,
+# and no postgres volume is owned by this stack.
+#
+# Bring up (fully unattended — no prompts, no manual db:push, no seeding step):
+#   docker compose up -d --build
+#
+# Order on `up`: migrate (applies schema) -> app. The app creates the first
+# admin itself at startup if none exists (src/instrumentation.ts), so there is
+# no bootstrap service in the deploy path that could fail the stack.
+#
+# Every credential comes from .env — compose aborts if a required one is
+# missing rather than falling back to a default.
+services:
+  # One-shot: applies the Drizzle migrations, then exits.
+  # `drizzle-kit migrate` replays drizzle/*.sql and never prompts for rename
+  # detection, so startup cannot block waiting on a TTY.
+  migrate:
+    build:
+      context: .
+      target: migrator
+    container_name: tracks-migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL_INTERNAL:?set DATABASE_URL_INTERNAL in .env}
+    networks:
+      - school-net
+    # The DB lives outside this stack, so we cannot depends_on its health.
+    # Retry a few times instead — covers the server rebooting and bringing up
+    # postgres-core and this stack at the same moment.
+    restart: on-failure:5
+
+  app:
+    build: .
+    container_name: tracks-app
+    restart: unless-stopped
+    # Gates on `migrate` only — the schema must exist before the app boots and
+    # bootstraps its first admin.
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: ${DATABASE_URL_INTERNAL:?set DATABASE_URL_INTERNAL in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-12h}
+      # Keep false for plain-HTTP LAN access (http://<ip>:3004); true behind HTTPS.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SCHOOLOS_API_BASE_URL: ${SCHOOLOS_API_BASE_URL:?set SCHOOLOS_API_BASE_URL in .env}
+      SCHOOLOS_API_KEY: ${SCHOOLOS_API_KEY:?set SCHOOLOS_API_KEY in .env}
+      # Where the in-app backup page writes pg_dump archives (persisted volume).
+      BACKUP_DIR: /app/backups
+      # Read at startup by src/instrumentation.ts: if the DB holds NO admin,
+      # one is created from these. A no-op once an admin exists, and never
+      # fatal — see src/lib/bootstrap.ts.
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-ผู้ดูแลระบบ}
+    volumes:
+      - tracks_backups:/app/backups
+    networks:
+      - school-net
+    ports:
+      - "${APP_PORT:-3004}:3000"
+
+volumes:
+  tracks_backups:
+    driver: local
+
+# The DB's network, created and owned by the postgres-core stack. `external`
+# means compose joins it and never creates or deletes it.
+networks:
+  school-net:
+    external: true

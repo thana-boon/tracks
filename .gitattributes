@@ -1,0 +1,16 @@
+# Force LF for all text so a repo cloned on Windows still builds cleanly in
+# Linux Docker (shell/entrypoint scripts break with CRLF).
+* text=auto eol=lf
+*.sh text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+
+# Binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.ttf binary
