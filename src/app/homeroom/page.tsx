@@ -6,18 +6,22 @@ import { listHomerooms, studentsByRoom, type Homeroom } from '@/lib/homeroom';
 import { classDaysOfYear } from '@/lib/subjects-for-user';
 import { Card, CardHeader, Badge, EmptyState, NeedYear, resultTone } from '@/components/ui';
 import { OVERALL_LABEL } from '@/lib/evaluate';
-import { RoomPicker } from './room-picker';
+import { RoomSwitcher } from './room-switcher';
+import { ReportExport } from './report-export';
 
 export const metadata = { title: 'ห้องที่ปรึกษา · Track' };
 
 /**
- * ห้องที่ปรึกษา — ครูเห็นเฉพาะห้องของตัวเอง, admin เห็นทุกห้องและเลือกได้ว่าจะดู
- * ห้องไหน (หลายห้องพร้อมกันก็ได้) พร้อมปุ่มออกรายงาน PDF.
+ * ห้องที่ปรึกษา — ครูเห็นเฉพาะห้องของตัวเอง, admin เลือกดูได้ทุกห้อง.
+ *
+ * Two separate controls on purpose: `?room=` picks the single ห้อง on screen
+ * (one click to switch), while the export panel keeps its own multi-room tick
+ * list. Sharing one control made changing rooms mean untickng the old one.
  */
 export default async function HomeroomPage({
   searchParams,
 }: {
-  searchParams: Promise<{ rooms?: string }>;
+  searchParams: Promise<{ room?: string }>;
 }) {
   const user = await requireRole('admin', 'teacher');
   const year = await activeYear();
@@ -41,21 +45,13 @@ export default async function HomeroomPage({
       </div>
     );
 
-  // A teacher always sees every room they advise; an admin sees what they tick,
-  // defaulting to the first room so the page never loads the whole school.
+  // A teacher always sees every room they advise; an admin reads one at a time,
+  // so the page never loads the whole school to show a single ห้อง.
   const sp = await searchParams;
-  let shown: Homeroom[] = rooms;
-  let selected: string[] = rooms.map((r) => r.key);
-  if (isAdmin) {
-    const asked = new Set(
-      (sp.rooms ?? '')
-        .split(',')
-        .map((k) => k.trim())
-        .filter(Boolean),
-    );
-    shown = sp.rooms === undefined ? rooms.slice(0, 1) : rooms.filter((r) => asked.has(r.key));
-    selected = shown.map((r) => r.key);
-  }
+  const viewing = isAdmin
+    ? rooms.find((r) => r.key === sp.room?.trim()) ?? rooms[0]
+    : null;
+  const shown: Homeroom[] = viewing ? [viewing] : rooms;
 
   const byRoom = await studentsByRoom(shown);
   const [transcripts, classDays] = await Promise.all([
@@ -68,16 +64,21 @@ export default async function HomeroomPage({
   return (
     <div className="space-y-6">
       <Header isAdmin={isAdmin} />
-      {isAdmin ? <RoomPicker rooms={rooms} selected={selected} months={months} /> : null}
+      {viewing ? (
+        <>
+          <RoomSwitcher rooms={rooms} current={viewing.key} />
+          {/* Keyed on the room in view: switching rooms should re-arm the export
+              on that room, never quietly leave the previous one ticked. */}
+          <ReportExport
+            key={viewing.key}
+            rooms={rooms}
+            months={months}
+            viewing={viewing.key}
+          />
+        </>
+      ) : null}
 
-      {shown.length === 0 ? (
-        <EmptyState
-          icon={<Users className="size-8" strokeWidth={1.5} />}
-          title="ยังไม่ได้เลือกห้อง"
-          hint="เลือกห้องด้านบนเพื่อดูรายชื่อนักเรียน หรือกดออกรายงานเป็น PDF"
-        />
-      ) : (
-        shown.map((room) => {
+      {shown.map((room) => {
           const list = (byRoom.get(room.key) ?? [])
             .map((id) => transcriptBy.get(id))
             .filter((t): t is NonNullable<typeof t> => Boolean(t));
@@ -144,10 +145,9 @@ export default async function HomeroomPage({
                   </table>
                 </div>
               )}
-            </Card>
-          );
-        })
-      )}
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -158,7 +158,7 @@ function Header({ isAdmin }: { isAdmin: boolean }) {
       <h1 className="text-2xl font-semibold tracking-tight">ห้องที่ปรึกษา</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         {isAdmin
-          ? 'เลือกห้องที่ต้องการ (เลือกได้หลายห้อง) เพื่อดูว่านักเรียนเรียนวิชาเสริมอะไรและผ่าน/ไม่ผ่าน — หรือกดออกรายงานเป็น PDF'
+          ? 'เลือกห้องเพื่อดูว่านักเรียนเรียนวิชาเสริมอะไรและผ่าน/ไม่ผ่าน · การออกรายงาน PDF แยกอีกส่วนหนึ่ง เลือกได้หลายห้องโดยไม่กระทบห้องที่กำลังดู'
           : 'ดูว่านักเรียนในห้องที่ปรึกษาของคุณเรียนวิชาเสริมอะไร และผ่าน/ไม่ผ่าน — อ่านอย่างเดียว'}
       </p>
     </div>

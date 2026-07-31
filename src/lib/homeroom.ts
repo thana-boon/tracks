@@ -146,7 +146,6 @@ export interface ReportStudent {
   id: number;
   code: string;
   fullName: string;
-  nickname: string | null;
   gradeLevel: string | null;
   classroom: string | null;
   classNumber: number | null;
@@ -178,7 +177,6 @@ export async function buildHomeroomReport(
       id: people.id,
       code: people.code,
       fullName: people.fullName,
-      nickname: people.nickname,
       gradeLevel: people.gradeLevel,
       classroom: people.classroom,
       classNumber: people.classNumber,

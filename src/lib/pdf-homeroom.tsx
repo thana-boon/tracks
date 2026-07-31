@@ -13,9 +13,11 @@ import type { MatrixCell, RoomMatrix } from './homeroom';
  */
 const DATES_PER_PAGE = 5;
 
-// 18 + 108 + 40 + 5 × 68 = 506pt, inside the 515pt a portrait A4 leaves once
-// the margins are taken — five date columns is the widest that fits.
-const W = { no: 18, name: 108, nick: 40, code: 32, result: 36 };
+// The name column takes whatever is left, like the ใบเช็คชื่อ does, so the
+// table always reaches both margins and the date columns end flush right.
+// 18 + 5 × 68 = 358pt of fixed width leaves 155pt for names on a portrait A4 —
+// a sixth date column would squeeze that below what a Thai full name needs.
+const W = { no: 18, code: 32, result: 36 };
 const DATE_W = W.code + W.result;
 /** Portrait has height to spare, so rows stay legible; a ห้อง still fits one sheet. */
 const ROW_H = 12;
@@ -35,9 +37,7 @@ const s = StyleSheet.create({
   meta: { fontSize: 8, color: MUTED, textAlign: 'right', lineHeight: 1.3 },
   rule: { height: 2, width: 40, backgroundColor: GOLD, marginTop: 4, marginBottom: 6 },
 
-  // Hug the columns instead of stretching: with two or three dates a full-width
-  // border would leave a band of empty header running off to the right.
-  table: { borderWidth: 1, borderColor: LINE, borderRadius: 3, alignSelf: 'flex-start' },
+  table: { borderWidth: 1, borderColor: LINE, borderRadius: 3 },
   head: { flexDirection: 'row', backgroundColor: '#f1edf7', borderBottomWidth: 1, borderColor: LINE },
   row: { flexDirection: 'row', borderBottomWidth: 1, borderColor: LINE, minHeight: ROW_H, alignItems: 'center' },
   rowLast: { borderBottomWidth: 0 },
@@ -77,8 +77,7 @@ const s = StyleSheet.create({
   // tall ascenders, so left to itself a row grows well past ROW_H and pushes
   // the room onto a second sheet.
   cNo: { width: W.no, fontSize: 6.5, textAlign: 'center', color: MUTED, maxLines: 1, lineHeight: 1 },
-  cName: { width: W.name, fontSize: 7, paddingLeft: 3, maxLines: 1, textOverflow: 'ellipsis', lineHeight: 1 },
-  cNick: { width: W.nick, fontSize: 7, paddingLeft: 3, color: MUTED, maxLines: 1, textOverflow: 'ellipsis', lineHeight: 1 },
+  cName: { flex: 1, fontSize: 7.5, paddingLeft: 4, maxLines: 1, textOverflow: 'ellipsis', lineHeight: 1 },
   cCode: { width: W.code, fontSize: 6.5, textAlign: 'center', maxLines: 1, lineHeight: 1 },
   cResult: { width: W.result, fontSize: 6.5, textAlign: 'center', fontWeight: 600, maxLines: 1, lineHeight: 1 },
 
@@ -184,11 +183,8 @@ function RoomPage({
             <View style={[s.headCell, { width: W.no }]}>
               <Text style={[s.headLabel, { fontSize: 6.5 }]}>ที่</Text>
             </View>
-            <View style={[s.headCell, { width: W.name, alignItems: 'flex-start', paddingLeft: 3 }]}>
+            <View style={[s.headCell, { flex: 1, alignItems: 'flex-start', paddingLeft: 4 }]}>
               <Text style={s.headLabel}>ชื่อ - สกุล</Text>
-            </View>
-            <View style={[s.headCell, { width: W.nick, alignItems: 'flex-start', paddingLeft: 3 }]}>
-              <Text style={s.headLabel}>ชื่อเล่น</Text>
             </View>
             {dates.map((d) => (
               <View key={d} style={[s.headCell, s.sep, s.headDate]}>
@@ -199,8 +195,7 @@ function RoomPage({
 
           <View style={s.headSub} fixed>
             <Text style={[s.headSubCell, { width: W.no }]} />
-            <Text style={[s.headSubCell, { width: W.name }]} />
-            <Text style={[s.headSubCell, { width: W.nick }]} />
+            <Text style={[s.headSubCell, { flex: 1 }]} />
             {dates.map((d) => (
               <React.Fragment key={d}>
                 <Text style={[s.headSubCell, s.sep, { width: W.code }]}>รหัสวิชา</Text>
@@ -217,7 +212,6 @@ function RoomPage({
             >
               <Text style={s.cNo}>{r.student.classNumber ?? i + 1}</Text>
               <Text style={s.cName}>{thai(r.student.fullName)}</Text>
-              <Text style={s.cNick}>{thai(r.student.nickname ?? '')}</Text>
               {dates.map((d) => (
                 <React.Fragment key={d}>
                   <DayCells cells={r.byDate.get(d)} />
