@@ -1,7 +1,7 @@
 import { listBackups } from '@/lib/backup';
 import { BackupManager, type BackupRow } from './backup-manager';
 
-export const metadata = { title: 'สำรองข้อมูล · Track' };
+export const metadata = { title: 'สำรองข้อมูล' };
 
 export default async function BackupPage() {
   const files = await listBackups();

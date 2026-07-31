@@ -50,7 +50,7 @@ async function verifyPerson(
     // SchoolOS role on every login (a promotion to teacher-admin applies
     // immediately, without waiting for the next roster sync).
     const [existing] = await db
-      .select({ id: people.id, fullName: people.fullName })
+      .select({ id: people.id, fullName: people.fullName, firstName: people.firstName })
       .from(people)
       .where(and(eq(people.type, 'teacher'), eq(people.schoolosId, verify.user.id)))
       .limit(1);
@@ -87,6 +87,9 @@ async function verifyPerson(
         sub: `person:${personId}`,
         role,
         name: verify.user.name || username,
+        // The synced row is the only place ชื่อจริง is split out; before the
+        // first sync the avatar falls back to stripping the คำนำหน้า itself.
+        firstName: existing?.firstName,
         personId,
       },
     };
@@ -94,7 +97,7 @@ async function verifyPerson(
 
   // student
   const [student] = await db
-    .select({ id: people.id, fullName: people.fullName })
+    .select({ id: people.id, fullName: people.fullName, firstName: people.firstName })
     .from(people)
     .where(and(eq(people.type, 'student'), eq(people.schoolosId, verify.user.id)))
     .limit(1);
@@ -111,6 +114,7 @@ async function verifyPerson(
       sub: `person:${student.id}`,
       role: 'student',
       name: verify.user.name || student.fullName,
+      firstName: student.firstName,
       personId: student.id,
     },
   };

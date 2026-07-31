@@ -4,7 +4,7 @@ import { normalizeYmd, todayYmd } from '@/lib/utils';
 import { NeedYear } from '@/components/ui';
 import { CheckIn } from './check-in';
 
-export const metadata = { title: 'เช็คชื่อ · Track' };
+export const metadata = { title: 'เช็คชื่อ' };
 
 /**
  * `?date=` and `?section=` jump straight to a step of the flow — the ผลเช็คชื่อ

@@ -6,7 +6,7 @@ import { NeedYear } from '@/components/ui';
 import { ClassroomsManager, type ClassroomItem } from './classrooms-manager';
 import type { PickStudent } from '@/components/student-picker';
 
-export const metadata = { title: 'ห้องเรียนพิเศษ · Track' };
+export const metadata = { title: 'ห้องเรียนพิเศษ' };
 
 export default async function ClassroomsPage() {
   const year = await activeYear();

@@ -7,7 +7,7 @@ import { homerooms } from '@/db/schema';
 import { and, eq, sql } from 'drizzle-orm';
 import { Card } from '@/components/ui';
 
-export const metadata = { title: 'ภาพรวมครู · Track' };
+export const metadata = { title: 'ภาพรวมครู' };
 
 const tiles = [
   { href: '/attendance', title: 'เช็คชื่อ', desc: 'บันทึกการเข้าเรียน เช้า/บ่าย', icon: ClipboardCheck, tone: 'primary' },

@@ -25,7 +25,7 @@ import {
 } from './register-manager';
 import type { PickStudent } from '@/components/student-picker';
 
-export const metadata = { title: 'จัดนักเรียนเข้าวิชา · Track' };
+export const metadata = { title: 'จัดนักเรียนเข้าวิชา' };
 
 export default async function RegisterPage() {
   const year = await activeYear();

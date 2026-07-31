@@ -1,7 +1,7 @@
 import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { AppShell } from '@/components/app-shell';
-import type { AppRole } from '@/lib/session';
+import { photoUrlOf, type AppRole } from '@/lib/session';
 
 /**
  * Wraps a page in the app shell for whichever of the given roles the current
@@ -21,6 +21,8 @@ export async function RoleShell({
     <AppShell
       role={user.role}
       name={user.name}
+      firstName={user.firstName}
+      photoUrl={photoUrlOf(user)}
       yearLabel={year ? `ปีการศึกษา ${year.year}` : 'ยังไม่ได้ซิงก์ปีการศึกษา'}
     >
       {children}

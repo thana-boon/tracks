@@ -5,6 +5,27 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * คำนำหน้าชื่อ that must not be mistaken for the name itself — "นายชรินทร์"
+ * has to yield "ช", not "น". Longest first so "นางสาว" wins over "นาง".
+ */
+const NAME_PREFIXES = [
+  'เด็กชาย', 'เด็กหญิง', 'นางสาว', 'นาง', 'นาย', 'ด.ช.', 'ด.ญ.', 'น.ส.',
+  'ว่าที่ร้อยตรี', 'ว่าที่ ร.ต.', 'ดร.', 'Master', 'Mrs.', 'Miss', 'Mr.', 'Ms.',
+];
+
+/** The letter an avatar shows when there is no photo: ตัวแรกของชื่อจริง. */
+export function initialOf(name: string | null | undefined): string {
+  let s = String(name ?? '').trim();
+  for (const p of NAME_PREFIXES) {
+    if (s.startsWith(p)) {
+      s = s.slice(p.length).trim();
+      break;
+    }
+  }
+  return s.charAt(0) || 'ผ';
+}
+
 /** Thai grade ordering key: อนุบาล < ประถม < มัธยม, then by number. */
 export function gradeKey(g: string | null): number {
   const m = /^(อ|ป|ม)\.?\s*(\d+)/.exec(g ?? '');

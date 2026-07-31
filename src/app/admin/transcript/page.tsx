@@ -6,7 +6,7 @@ import { sortGrades } from '@/lib/utils';
 import { NeedYear } from '@/components/ui';
 import { TranscriptPanel } from './transcript-panel';
 
-export const metadata = { title: 'ทรานสคริปต์ · Track' };
+export const metadata = { title: 'ทรานสคริปต์' };
 
 export default async function TranscriptPage() {
   const year = await activeYear();

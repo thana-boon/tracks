@@ -5,7 +5,7 @@ import { NeedYear, Card, CardHeader, Badge, EmptyState, resultTone } from '@/com
 import { SectionSwitcher } from '@/components/subject-switcher';
 import { OVERALL_LABEL, PASS_MIN_RATIO } from '@/lib/evaluate';
 
-export const metadata = { title: 'ผลการเรียน · Track' };
+export const metadata = { title: 'ผลการเรียน' };
 
 export default async function ResultsPage({
   searchParams,

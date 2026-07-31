@@ -10,7 +10,7 @@ import { Card, CardHeader, Badge, EmptyState, NeedYear, resultTone } from '@/com
 import { OVERALL_LABEL, PASS_MIN_RATIO } from '@/lib/evaluate';
 import { thaiDateShort } from '@/lib/utils';
 
-export const metadata = { title: 'วิชาเสริมของฉัน · Track' };
+export const metadata = { title: 'วิชาเสริมของฉัน' };
 
 export default async function StudentHome() {
   const user = await requireRole('student');

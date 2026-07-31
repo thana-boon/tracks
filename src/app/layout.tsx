@@ -12,7 +12,11 @@ const font = IBM_Plex_Sans_Thai({
 });
 
 export const metadata: Metadata = {
-  title: 'Track วิชาเสริม · สุคนธีรวิทย์',
+  // Pages set their own titles; the template keeps the branding on all of them.
+  title: {
+    default: 'Tracks - SchoolOS | โรงเรียนสุคนธรวิทย์',
+    template: '%s · Tracks - SchoolOS | โรงเรียนสุคนธรวิทย์',
+  },
   description: 'ระบบวิชาเสริม ม.4-6 โรงเรียนสุคนธีรวิทย์',
 };
 

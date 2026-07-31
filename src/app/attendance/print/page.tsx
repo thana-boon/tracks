@@ -9,7 +9,7 @@ import {
 import { NeedYear, EmptyState } from '@/components/ui';
 import { PrintPanel, type PrintSection } from './print-panel';
 
-export const metadata = { title: 'พิมพ์ใบเช็คชื่อ · Track' };
+export const metadata = { title: 'พิมพ์ใบเช็คชื่อ' };
 
 export default async function AttendancePrintPage({
   searchParams,

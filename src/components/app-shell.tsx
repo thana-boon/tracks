@@ -6,17 +6,24 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Menu, X, LogOut, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { Avatar } from './avatar';
 import { navFor, roleLabel, type NavItem } from './nav-config';
 import type { AppRole } from '@/lib/session';
 
 export function AppShell({
   role,
   name,
+  firstName,
+  photoUrl,
   yearLabel,
   children,
 }: {
   role: AppRole;
   name: string;
+  /** ชื่อจริง — the avatar initial comes from this when there is no photo */
+  firstName?: string;
+  /** account photo endpoint, or null for accounts without a SchoolOS person */
+  photoUrl?: string | null;
   yearLabel?: string;
   children: React.ReactNode;
 }) {
@@ -36,6 +43,8 @@ export function AppShell({
         <SidebarContent
           role={role}
           name={name}
+          firstName={firstName}
+          photoUrl={photoUrl}
           nav={nav}
           collapsed={collapsed}
           onToggle={() => setCollapsed((c) => !c)}
@@ -54,6 +63,8 @@ export function AppShell({
             <SidebarContent
               role={role}
               name={name}
+              firstName={firstName}
+              photoUrl={photoUrl}
               nav={nav}
               collapsed={false}
               onNavigate={() => setMobileOpen(false)}
@@ -84,9 +95,11 @@ export function AppShell({
               <p className="text-sm font-medium leading-tight">{name}</p>
               <p className="text-xs text-muted-foreground">{roleLabel[role]}</p>
             </div>
-            <span className="grid size-9 place-items-center rounded-full bg-primary text-sm font-semibold text-[#F5C518]">
-              {name.trim().charAt(0) || 'ผ'}
-            </span>
+            <Avatar
+              src={photoUrl}
+              name={firstName || name}
+              className="size-9 bg-primary text-sm font-semibold text-[#F5C518]"
+            />
           </div>
         </header>
 
@@ -99,6 +112,8 @@ export function AppShell({
 function SidebarContent({
   role,
   name,
+  firstName,
+  photoUrl,
   nav,
   collapsed,
   onToggle,
@@ -107,6 +122,8 @@ function SidebarContent({
 }: {
   role: AppRole;
   name: string;
+  firstName?: string;
+  photoUrl?: string | null;
   nav: NavItem[];
   collapsed: boolean;
   onToggle?: () => void;
@@ -181,9 +198,11 @@ function SidebarContent({
       <div className="border-t border-white/8 p-3">
         {!collapsed ? (
           <div className="mb-2 flex items-center gap-2.5 rounded-xl bg-white/5 px-3 py-2.5 ring-1 ring-white/8">
-            <span className="grid size-8 place-items-center rounded-full bg-[#F5C518] text-xs font-semibold text-[#241b04]">
-              {name.trim().charAt(0) || 'ผ'}
-            </span>
+            <Avatar
+              src={photoUrl}
+              name={firstName || name}
+              className="size-8 bg-[#F5C518] text-xs font-semibold text-[#241b04]"
+            />
             <div className="min-w-0 leading-tight">
               <p className="truncate text-sm font-medium text-white">{name}</p>
               <p className="truncate text-xs text-white/50">{roleLabel[role]}</p>

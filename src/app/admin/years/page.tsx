@@ -5,7 +5,7 @@ import { ActionButton } from '@/components/action-button';
 import { thaiDateLong } from '@/lib/utils';
 import { syncYearsAction } from './actions';
 
-export const metadata = { title: 'ปีการศึกษา · Track' };
+export const metadata = { title: 'ปีการศึกษา' };
 
 export default async function YearsPage() {
   const years = await allYears();

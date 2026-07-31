@@ -11,10 +11,17 @@ export interface SessionUser {
   sub: string;
   role: AppRole;
   name: string;
+  /** ชื่อจริง without the คำนำหน้า — what the avatar initial is taken from */
+  firstName?: string;
   /** local admin id, when the session came from a local admin account */
   adminId?: number;
   /** people.id, when the session came from a SchoolOS teacher/student */
   personId?: number;
+}
+
+/** Where the shell reads this user's account photo, if they can have one. */
+export function photoUrlOf(user: SessionUser): string | null {
+  return user.personId ? `/api/photo/${user.personId}` : null;
 }
 
 function secret(): Uint8Array {

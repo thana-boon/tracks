@@ -8,7 +8,7 @@ import { ActionButton } from '@/components/action-button';
 import { sortGrades } from '@/lib/utils';
 import { syncStudentsAction, syncTeachersAction, syncHomeroomsAction } from './actions';
 
-export const metadata = { title: 'ซิงก์รายชื่อ · Track' };
+export const metadata = { title: 'ซิงก์รายชื่อ' };
 
 export default async function PeoplePage() {
   const year = await activeYear();

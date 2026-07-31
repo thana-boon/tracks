@@ -3,7 +3,7 @@ import { db } from '@/db';
 import { trackGroups, trackSubjects } from '@/db/schema';
 import { GroupsManager, type GroupItem } from './groups-manager';
 
-export const metadata = { title: 'กลุ่มวิชา · Track' };
+export const metadata = { title: 'กลุ่มวิชา' };
 
 export default async function GroupsPage() {
   const rows = await db

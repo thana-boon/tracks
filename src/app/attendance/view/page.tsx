@@ -5,7 +5,7 @@ import { normalizeYmd, todayYmd } from '@/lib/utils';
 import { DayList, DayDetail, SectionsOnDay, TermSummary } from './views';
 import type { DayStatus } from './day-filter';
 
-export const metadata = { title: 'ผลเช็คชื่อ · Track' };
+export const metadata = { title: 'ผลเช็คชื่อ' };
 
 /**
  * ผลเช็คชื่อ — ผู้ดูแลระบบเท่านั้น (ครูเช็คชื่อได้ แต่ดูภาพรวมทั้งโรงเรียนไม่ได้).

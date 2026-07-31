@@ -13,7 +13,7 @@ import { activeYear } from '@/lib/years';
 import { adminCounts } from '@/lib/data';
 import { Card } from '@/components/ui';
 
-export const metadata = { title: 'ภาพรวม · Track' };
+export const metadata = { title: 'ภาพรวม' };
 
 const tiles = [
   { href: '/admin/people', title: 'ซิงก์รายชื่อ', desc: 'ดึงนักเรียน ม.4-6 · ครู · ครูที่ปรึกษา', icon: RefreshCw, tone: 'primary' },

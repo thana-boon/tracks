@@ -3,7 +3,7 @@ import { db } from '@/db';
 import { registrations, trackGroups, trackSubjects } from '@/db/schema';
 import { SubjectsManager, type SubjectItem, type GroupOption } from './subjects-manager';
 
-export const metadata = { title: 'วิชาเสริม · Track' };
+export const metadata = { title: 'วิชาเสริม' };
 
 export default async function SubjectsPage() {
   const [rows, groups] = await Promise.all([

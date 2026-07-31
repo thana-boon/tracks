@@ -5,7 +5,7 @@ import { activityLogs } from '@/db/schema';
 import { Card, CardHeader, Badge, EmptyState } from '@/components/ui';
 import { thaiDateTimeLongOf } from '@/lib/utils';
 
-export const metadata = { title: 'ประวัติการใช้งาน · Track' };
+export const metadata = { title: 'ประวัติการใช้งาน' };
 
 const ACTION_LABEL: Record<string, string> = {
   login: 'เข้าสู่ระบบ',

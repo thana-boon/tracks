@@ -196,6 +196,20 @@ export const schoolos = {
       : null;
   },
 
+  /**
+   * The account photo of a person, straight from the Users Service. Returned as
+   * the raw upstream Response (image bytes) because our own /api/photo route
+   * only proxies it — the API key must not reach the browser. A person without
+   * a photo answers 404 upstream, which the route passes through unchanged.
+   */
+  async photo(type: 'student' | 'teacher', schoolosId: number): Promise<Response> {
+    if (!KEY) throw new SchoolOsError(500, 'no_key', 'SCHOOLOS_API_KEY is not set');
+    return fetch(`${BASE}/api/public/v1/${type}s/${schoolosId}/photo`, {
+      headers: { 'X-API-Key': KEY },
+      cache: 'no-store',
+    });
+  },
+
   /** Verify a student/teacher credential against SchoolOS (login only). */
   verify: (role: 'student' | 'teacher', username: string, password: string) =>
     request<VerifyResult>('/api/public/v1/auth/verify', {

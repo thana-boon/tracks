@@ -9,7 +9,7 @@ import { OVERALL_LABEL } from '@/lib/evaluate';
 import { RoomSwitcher } from './room-switcher';
 import { ReportExport } from './report-export';
 
-export const metadata = { title: 'ห้องที่ปรึกษา · Track' };
+export const metadata = { title: 'ห้องที่ปรึกษา' };
 
 /**
  * ห้องที่ปรึกษา — ครูเห็นเฉพาะห้องของตัวเอง, admin เลือกดูได้ทุกห้อง.
