@@ -8,21 +8,28 @@ import {
   ClipboardPen,
   ClipboardCheck,
   School,
+  CalendarCheck,
+  ShieldCheck,
+  Users,
 } from 'lucide-react';
 import { activeYear } from '@/lib/years';
 import { adminCounts } from '@/lib/data';
-import { Card } from '@/components/ui';
+import { lastSyncAt } from '@/lib/auto-sync';
+import { thaiRelativeTime } from '@/lib/utils';
 
 export const metadata = { title: 'ภาพรวม' };
 
 const tiles = [
-  { href: '/admin/people', title: 'ซิงก์รายชื่อ', desc: 'ดึงนักเรียน ม.4-6 · ครู · ครูที่ปรึกษา', icon: RefreshCw, tone: 'primary' },
+  { href: '/admin/people', title: 'ซิงก์รายชื่อ', desc: 'อัตโนมัติ — ดูสถานะและสั่งซิงก์ทันที', icon: RefreshCw, tone: 'primary' },
   { href: '/admin/groups', title: 'กลุ่มวิชา', desc: 'จัดกลุ่ม/หมวดหมู่วิชาเสริม', icon: FolderKanban, tone: 'navy' },
   { href: '/admin/subjects', title: 'วิชาเสริม', desc: 'วิชาในแต่ละกลุ่มและครูผู้สอน', icon: BookOpen, tone: 'primary' },
   { href: '/admin/classrooms', title: 'ห้องเรียนพิเศษ', desc: 'จัดกลุ่มห้องแยกจากห้องประจำ', icon: School, tone: 'navy' },
   { href: '/admin/register', title: 'จัดนักเรียนเข้าวิชา', desc: 'กำหนดวันเรียน + เลือกนักเรียน', icon: ClipboardPen, tone: 'accent' },
   { href: '/attendance', title: 'เช็คชื่อ', desc: 'บันทึกการเข้าเรียน เช้า/บ่าย', icon: ClipboardCheck, tone: 'primary' },
-  { href: '/results', title: 'ผลการเรียน', desc: 'ผ่าน/ไม่ผ่าน จากการเช็คชื่อ', icon: GraduationCap, tone: 'accent' },
+  { href: '/results', title: 'เวลาเข้าเรียน', desc: 'รายห้องหลัก — มากี่ครั้ง ขาดกี่ครั้ง', icon: CalendarCheck, tone: 'accent' },
+  { href: '/results/subject', title: 'ผลรายวิชา', desc: 'ผ่าน/ไม่ผ่าน รายรอบเรียน', icon: GraduationCap, tone: 'navy' },
+  { href: '/homeroom', title: 'ห้องที่ปรึกษา', desc: 'ดูรายห้อง + ออกรายงาน PDF', icon: Users, tone: 'primary' },
+  { href: '/admin/permissions', title: 'สิทธิ์ผู้ดูแล', desc: 'ดึงครูเป็นผู้ดูแลเฉพาะระบบนี้', icon: ShieldCheck, tone: 'navy' },
 ] as const;
 
 const iconTone: Record<string, string> = {
@@ -32,7 +39,11 @@ const iconTone: Record<string, string> = {
 };
 
 export default async function AdminHome() {
-  const [year, counts] = await Promise.all([activeYear(), adminCounts()]);
+  const [year, counts, syncedAt] = await Promise.all([
+    activeYear(),
+    adminCounts(),
+    lastSyncAt(),
+  ]);
 
   const metrics = [
     { label: 'กลุ่มวิชา', value: counts.groups },
@@ -49,7 +60,9 @@ export default async function AdminHome() {
             <p className="text-xs font-medium uppercase tracking-wide text-white/60">ระบบวิชาเสริม ม.ปลาย</p>
             <h1 className="mt-1 text-2xl font-semibold">ภาพรวมผู้ดูแลระบบ</h1>
             <p className="mt-1 text-sm text-white/70">
-              {year ? `ปีการศึกษา ${year.year} · กำลังใช้งาน` : 'ยังไม่ได้ซิงก์ปีการศึกษา — เริ่มที่หน้าปีการศึกษา'}
+              {year ? `ปีการศึกษา ${year.year} · กำลังใช้งาน` : 'ยังไม่ได้ซิงก์ปีการศึกษา — ระบบจะซิงก์ให้เองในรอบถัดไป'}
+              {' · '}
+              ซิงก์ล่าสุด {syncedAt ? thaiRelativeTime(syncedAt) : 'ยังไม่เคย'}
             </p>
             <div className="mt-4 h-0.5 w-10 rounded-full bg-[#F5C518]" />
           </div>

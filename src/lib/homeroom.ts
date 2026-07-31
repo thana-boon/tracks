@@ -11,7 +11,20 @@ import {
 } from '@/db/schema';
 import { attendanceRecords, classDatesOf } from './data';
 import { evaluateSubject, type DayResult } from './evaluate';
+import type { HomeroomReportEntry, ReportDay, ReportStudent } from './attendance-summary';
 import type { YearRow } from './years';
+
+// The report's data shapes and the counting on top of them are pure, so they
+// live in a module a test can import (see attendance-summary.ts) and are
+// re-exported here — every caller keeps reading them off '@/lib/homeroom'.
+export type {
+  AttendanceLine,
+  AttendanceRow,
+  HomeroomReportEntry,
+  ReportDay,
+  ReportStudent,
+} from './attendance-summary';
+export { summarizeAttendance } from './attendance-summary';
 
 /**
  * ห้องที่ปรึกษา — the homeroom a student belongs to, identified everywhere
@@ -129,33 +142,6 @@ export async function studentsByRoom(rooms: Homeroom[]): Promise<Map<string, num
 }
 
 /* ── The report an admin exports ─────────────────────────────────────────── */
-
-/** One class date of one วิชาเสริม, as the report prints it. */
-export interface ReportDay {
-  date: string;
-  subjectCode: string;
-  subjectName: string;
-  sectionName: string;
-  morning: boolean | null;
-  afternoon: boolean | null;
-  /** null = the day is scheduled but nobody has checked it yet */
-  result: DayResult | null;
-}
-
-export interface ReportStudent {
-  id: number;
-  code: string;
-  fullName: string;
-  gradeLevel: string | null;
-  classroom: string | null;
-  classNumber: number | null;
-}
-
-export interface HomeroomReportEntry {
-  student: ReportStudent;
-  /** every scheduled class date of every subject the student sits, ascending */
-  days: ReportDay[];
-}
 
 /**
  * Per-student attendance across every วิชาเสริม they are registered for, day by

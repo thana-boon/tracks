@@ -1,14 +1,16 @@
 import { CalendarDays, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { allYears } from '@/lib/years';
+import { readSyncState } from '@/lib/auto-sync';
 import { Card, CardHeader, Badge, EmptyState } from '@/components/ui';
 import { ActionButton } from '@/components/action-button';
+import { SyncStatus } from '@/components/sync-status';
 import { thaiDateLong } from '@/lib/utils';
 import { syncYearsAction } from './actions';
 
 export const metadata = { title: 'ปีการศึกษา' };
 
 export default async function YearsPage() {
-  const years = await allYears();
+  const [years, syncState] = await Promise.all([allYears(), readSyncState()]);
 
   return (
     <div className="space-y-6">
@@ -16,19 +18,25 @@ export default async function YearsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">ปีการศึกษา</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            ปฏิทินการศึกษาซิงก์จาก SchoolOS — ปีที่ใช้งานตามระบบกลาง แก้ไขที่นี่ไม่ได้
+            ปฏิทินการศึกษาซิงก์จาก SchoolOS ให้อัตโนมัติ — ปีที่ใช้งานตามระบบกลาง แก้ไขที่นี่ไม่ได้
           </p>
         </div>
-        <ActionButton action={syncYearsAction} icon={<RefreshCw className="size-4.5" strokeWidth={1.8} />}>
-          ซิงก์จาก SchoolOS
+        <ActionButton
+          action={syncYearsAction}
+          variant="secondary"
+          icon={<RefreshCw className="size-4.5" strokeWidth={1.8} />}
+        >
+          ซิงก์เดี๋ยวนี้
         </ActionButton>
       </div>
+
+      <SyncStatus state={syncState} only={['years']} />
 
       {years.length === 0 ? (
         <EmptyState
           icon={<CalendarDays className="size-8" strokeWidth={1.5} />}
           title="ยังไม่มีข้อมูลปีการศึกษา"
-          hint="กดปุ่ม “ซิงก์จาก SchoolOS” เพื่อดึงปฏิทินการศึกษาเข้าระบบ"
+          hint="รอบซิงก์อัตโนมัติจะดึงปฏิทินให้เอง — หรือกด “ซิงก์เดี๋ยวนี้” ถ้าไม่อยากรอ"
         />
       ) : (
         <Card>

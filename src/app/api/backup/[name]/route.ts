@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { getSession } from '@/lib/session';
+import { currentUser } from '@/lib/authz';
 import { isValidBackupName, readBackup } from '@/lib/backup';
 
 export const runtime = 'nodejs';
@@ -9,7 +9,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ name: string }> },
 ) {
-  const user = await getSession();
+  const user = await currentUser();
   if (!user || user.role !== 'admin')
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 

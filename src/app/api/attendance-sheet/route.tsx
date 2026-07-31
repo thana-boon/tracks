@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { renderToBuffer } from '@react-pdf/renderer';
-import { getSession } from '@/lib/session';
+import { currentUser } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { listSections, studentsInSection, classDatesOf } from '@/lib/data';
 import { AttendanceSheet, type AttendanceSheetSection } from '@/lib/pdf-attendance';
@@ -16,7 +16,7 @@ export const runtime = 'nodejs';
  */
 export async function GET(req: NextRequest) {
   // Admin only — teachers check in on screen and do not print blank sheets.
-  const user = await getSession();
+  const user = await currentUser();
   if (!user || user.role !== 'admin')
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 

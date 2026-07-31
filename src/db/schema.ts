@@ -100,6 +100,43 @@ export const homerooms = pgTable(
   ],
 );
 
+// ── สิทธิ์ผู้ดูแลของระบบนี้ (local admin grants) ──────────────
+// A teacher promoted to admin *here only*. The Users Service keeps owning its
+// own `teacher-admin` role — this table never writes back to it, and revoking a
+// grant cannot demote someone who is teacher-admin upstream. One row per
+// teacher: revoking deletes the row, and the history lives in activity_logs.
+export const adminGrants = pgTable(
+  'admin_grants',
+  {
+    id: serial('id').primaryKey(),
+    personId: integer('person_id')
+      .notNull()
+      .references(() => people.id, { onDelete: 'cascade' }),
+    /** why this teacher was given admin — free text, shown on the สิทธิ์ page */
+    note: text('note'),
+    grantedBy: text('granted_by').notNull(),
+    grantedByName: text('granted_by_name').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('admin_grants_person_uq').on(t.personId)],
+);
+
+// ── สถานะการซิงก์อัตโนมัติ ───────────────────────────────────
+// One row per sync kind, overwritten on every run. The people/years screens read
+// it to show when the roster last refreshed itself and whether it succeeded —
+// the auto-sync runs in the background, so without this it would be invisible.
+export const syncState = pgTable('sync_state', {
+  /** 'years' | 'students' | 'teachers' | 'homerooms' */
+  kind: text('kind').primaryKey(),
+  /** 'auto' | 'manual' */
+  trigger: text('trigger').notNull(),
+  ok: boolean('ok').notNull(),
+  message: text('message'),
+  detail: jsonb('detail'),
+  durationMs: integer('duration_ms'),
+  ranAt: timestamp('ran_at').notNull().defaultNow(),
+});
+
 // ── track groups (กลุ่มวิชา, e.g. "ET") ──────────────────────
 export const trackGroups = pgTable('track_groups', {
   id: serial('id').primaryKey(),

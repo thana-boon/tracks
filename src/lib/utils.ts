@@ -127,6 +127,25 @@ export function thaiDateTimeLongOf(d: Date | null | undefined): string {
   return date ? `${date} ${toSchoolTime(d)}` : '';
 }
 
+/**
+ * "3 นาทีที่แล้ว" / "อีก 2 ชั่วโมง" — how long ago (or ahead) an instant is,
+ * for status lines where the exact stamp is noise. Falls back to the full date
+ * past a week, when "8 วันที่แล้ว" stops being easier to read than the date.
+ */
+export function thaiRelativeTime(d: Date | null | undefined, now: Date = new Date()): string {
+  if (!d) return '—';
+  const ms = d.getTime() - now.getTime();
+  const abs = Math.abs(ms);
+  const ahead = ms > 0;
+  const say = (n: number, unit: string) => (ahead ? `อีก ${n} ${unit}` : `${n} ${unit}ที่แล้ว`);
+
+  if (abs < 60_000) return ahead ? 'อีกไม่ถึงนาที' : 'เมื่อสักครู่';
+  if (abs < 3_600_000) return say(Math.round(abs / 60_000), 'นาที');
+  if (abs < 86_400_000) return say(Math.round(abs / 3_600_000), 'ชั่วโมง');
+  if (abs < 7 * 86_400_000) return say(Math.round(abs / 86_400_000), 'วัน');
+  return thaiDateTimeLongOf(d);
+}
+
 /** Weekday index (0=Sun…6=Sat) of a "YYYY-MM-DD", timezone-proof. */
 export function weekdayOfYmd(ymd: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());

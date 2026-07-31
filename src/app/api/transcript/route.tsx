@@ -3,7 +3,7 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import { classroomStudents, people, registrations } from '@/db/schema';
-import { getSession } from '@/lib/session';
+import { currentUser } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { buildTranscripts } from '@/lib/transcript';
 import { TranscriptDocument } from '@/lib/pdf-transcript';
@@ -16,7 +16,7 @@ export const runtime = 'nodejs';
  * Admin only. Year defaults to the active one.
  */
 export async function GET(req: NextRequest) {
-  const user = await getSession();
+  const user = await currentUser();
   if (!user || user.role !== 'admin')
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 

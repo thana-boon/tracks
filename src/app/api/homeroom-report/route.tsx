@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { renderToBuffer } from '@react-pdf/renderer';
-import { getSession } from '@/lib/session';
+import { currentUser } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { buildHomeroomReport, listHomerooms, studentsByRoom, toRoomMatrix } from '@/lib/homeroom';
 import { HomeroomReportDocument } from '@/lib/pdf-homeroom';
@@ -18,7 +18,7 @@ const MAX_STUDENTS = 600;
  * own rooms on screen instead.
  */
 export async function GET(req: NextRequest) {
-  const user = await getSession();
+  const user = await currentUser();
   if (!user || user.role !== 'admin')
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 

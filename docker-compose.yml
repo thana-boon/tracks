@@ -50,6 +50,10 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       SCHOOLOS_API_BASE_URL: ${SCHOOLOS_API_BASE_URL:?set SCHOOLOS_API_BASE_URL in .env}
       SCHOOLOS_API_KEY: ${SCHOOLOS_API_KEY:?set SCHOOLOS_API_KEY in .env}
+      # Minutes between background roster syncs (ปี → นักเรียน → ครู → ที่ปรึกษา).
+      # 0 disables it and leaves the manual buttons as the only way. See
+      # src/lib/auto-sync.ts.
+      AUTO_SYNC_INTERVAL_MINUTES: ${AUTO_SYNC_INTERVAL_MINUTES:-360}
       # Where the in-app backup page writes pg_dump archives (persisted volume).
       BACKUP_DIR: /app/backups
       # Read at startup by src/instrumentation.ts: if the DB holds NO admin,

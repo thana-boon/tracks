@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { admins, people } from '@/db/schema';
 import { verifyPassword } from './password';
 import { schoolos, SchoolOsError } from './schoolos';
+import { hasAdminGrant } from './admin-grants';
 import type { SessionUser } from './session';
 
 export interface LoginOutcome {
@@ -80,7 +81,13 @@ async function verifyPerson(
       personId = inserted.id;
     }
 
-    const role = verify.user.role === 'teacher-admin' ? 'admin' : 'teacher';
+    // Two independent ways to be an admin here: the Users Service says so, or
+    // this school added a local grant on หน้าสิทธิ์. Neither can revoke the
+    // other — the grant is additive by design.
+    const role: 'admin' | 'teacher' =
+      verify.user.role === 'teacher-admin' || (await hasAdminGrant(personId))
+        ? 'admin'
+        : 'teacher';
     return {
       ok: true,
       user: {

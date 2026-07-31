@@ -1,12 +1,11 @@
 import { redirect } from 'next/navigation';
-import { getSession } from '@/lib/session';
-import { dashboardPath } from '@/lib/authz';
+import { currentUser, dashboardPath } from '@/lib/authz';
 import { LoginForm } from './login-form';
 
 export const metadata = { title: 'เข้าสู่ระบบ' };
 
 export default async function LoginPage() {
-  const user = await getSession();
+  const user = await currentUser();
   if (user) redirect(dashboardPath(user.role));
 
   return (

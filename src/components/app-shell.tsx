@@ -140,12 +140,12 @@ function SidebarContent({
     router.refresh();
   }
 
-  // Exact match for dashboards; prefix elsewhere. /attendance/view and /print
-  // are their own entries, so /attendance itself needs an exact match too.
-  const isActive = (href: string) => {
-    if (href === `/${role}` || href === '/attendance') return pathname === href;
-    return pathname.startsWith(href);
-  };
+  // Exact match for dashboards and for any entry that has sub-entries of its
+  // own: /attendance/view, /attendance/print and /results/subject are separate
+  // nav items, so their parents must not light up when a child is open.
+  const exact = new Set([`/${role}`, '/attendance', '/results']);
+  const isActive = (href: string) =>
+    exact.has(href) ? pathname === href : pathname.startsWith(href);
 
   return (
     <>

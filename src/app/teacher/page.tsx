@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ClipboardCheck, GraduationCap, Users, ArrowUpRight } from 'lucide-react';
+import { ClipboardCheck, GraduationCap, Users, ArrowUpRight, CalendarCheck } from 'lucide-react';
 import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { db } from '@/db';
@@ -11,7 +11,8 @@ export const metadata = { title: 'ภาพรวมครู' };
 
 const tiles = [
   { href: '/attendance', title: 'เช็คชื่อ', desc: 'บันทึกการเข้าเรียน เช้า/บ่าย', icon: ClipboardCheck, tone: 'primary' },
-  { href: '/results', title: 'ผลการเรียน', desc: 'ผ่าน/ไม่ผ่าน จากการเช็คชื่อ', icon: GraduationCap, tone: 'accent' },
+  { href: '/results', title: 'เวลาเข้าเรียน', desc: 'ห้องที่ปรึกษาของคุณ — มากี่ครั้ง ขาดกี่ครั้ง', icon: CalendarCheck, tone: 'accent' },
+  { href: '/results/subject', title: 'ผลรายวิชา', desc: 'ผ่าน/ไม่ผ่าน รายรอบเรียน', icon: GraduationCap, tone: 'navy' },
 ] as const;
 
 const iconTone: Record<string, string> = {

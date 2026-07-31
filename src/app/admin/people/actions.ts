@@ -2,54 +2,64 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireRole } from '@/lib/authz';
-import { syncStudents, syncTeachers, syncHomerooms } from '@/lib/sync';
-import { activeYear } from '@/lib/years';
 import { logActivity } from '@/lib/log';
+import { runFullSync, runSyncStep, SYNC_KIND_LABEL, type SyncKind } from '@/lib/auto-sync';
 import type { ActionResult } from '@/components/action-button';
 
-export async function syncStudentsAction(): Promise<ActionResult> {
+/**
+ * The manual half of the sync. Every button here runs the same step the
+ * background scheduler runs (`runSyncStep`), so a hand-pressed sync and an
+ * automatic one leave identical state behind — including the `sync_state` row
+ * the screen reads back.
+ */
+
+function refresh() {
+  revalidatePath('/admin/people');
+  revalidatePath('/admin/years');
+  revalidatePath('/admin');
+}
+
+async function manualStep(kind: SyncKind): Promise<ActionResult> {
   const user = await requireRole('admin');
-  try {
-    const c = await syncStudents();
-    await logActivity(user, 'sync_students', undefined, c);
-    revalidatePath('/admin/people');
-    return {
-      ok: true,
-      message: `ซิงก์นักเรียน ม.4-6 สำเร็จ: เพิ่ม ${c.created}, ปรับปรุง ${c.updated} (ทั้งหมด ${c.total})`,
-    };
-  } catch (e) {
-    return { ok: false, message: `ซิงก์ไม่สำเร็จ: ${e instanceof Error ? e.message : 'error'}` };
-  }
+  const r = await runSyncStep(kind, 'manual');
+  await logActivity(user, `sync_${kind}`, 'manual', { ok: r.ok, message: r.message });
+  refresh();
+  return r.ok
+    ? { ok: true, message: `ซิงก์${SYNC_KIND_LABEL[kind]}สำเร็จ: ${r.message}` }
+    : { ok: false, message: `ซิงก์${SYNC_KIND_LABEL[kind]}ไม่สำเร็จ: ${r.message}` };
+}
+
+export async function syncStudentsAction(): Promise<ActionResult> {
+  return manualStep('students');
 }
 
 export async function syncTeachersAction(): Promise<ActionResult> {
-  const user = await requireRole('admin');
-  try {
-    const c = await syncTeachers();
-    await logActivity(user, 'sync_teachers', undefined, c);
-    revalidatePath('/admin/people');
-    return {
-      ok: true,
-      message: `ซิงก์ครูสำเร็จ: เพิ่ม ${c.created}, ปรับปรุง ${c.updated} (ทั้งหมด ${c.total})`,
-    };
-  } catch (e) {
-    return { ok: false, message: `ซิงก์ไม่สำเร็จ: ${e instanceof Error ? e.message : 'error'}` };
-  }
+  return manualStep('teachers');
 }
 
 export async function syncHomeroomsAction(): Promise<ActionResult> {
+  return manualStep('homerooms');
+}
+
+/** ปี → นักเรียน → ครู → ครูที่ปรึกษา in one press — the dependency order. */
+export async function syncAllAction(): Promise<ActionResult> {
   const user = await requireRole('admin');
-  const year = await activeYear();
-  if (!year) return { ok: false, message: 'ยังไม่ได้ซิงก์ปีการศึกษา — ซิงก์ปีก่อน' };
-  try {
-    const c = await syncHomerooms(year.id, year.schoolosId);
-    await logActivity(user, 'sync_homerooms', `year:${year.year}`, c);
-    revalidatePath('/admin/people');
-    return {
-      ok: true,
-      message: `ซิงก์ครูที่ปรึกษาสำเร็จ: ${c.created} รายการ (พบจาก API ${c.total})`,
-    };
-  } catch (e) {
-    return { ok: false, message: `ซิงก์ไม่สำเร็จ: ${e instanceof Error ? e.message : 'error'}` };
-  }
+  const out = await runFullSync('manual');
+  if (out.length === 0)
+    return { ok: false, message: 'มีการซิงก์กำลังทำงานอยู่ — รอสักครู่แล้วลองใหม่' };
+
+  await logActivity(user, 'sync_all', 'manual', {
+    steps: out.map((o) => ({ kind: o.kind, ok: o.ok, message: o.message })),
+  });
+  refresh();
+
+  const failed = out.filter((o) => !o.ok);
+  if (failed.length === 0)
+    return { ok: true, message: `ซิงก์ทั้งหมดสำเร็จ (${out.length} รายการ)` };
+  return {
+    ok: false,
+    message: `ซิงก์ไม่ครบ — ${failed
+      .map((f) => `${SYNC_KIND_LABEL[f.kind]}: ${f.message}`)
+      .join(' · ')}`,
+  };
 }

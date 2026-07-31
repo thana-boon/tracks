@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { GraduationCap } from 'lucide-react';
 import { activeYear } from '@/lib/years';
 import { listSections, evaluateAll } from '@/lib/data';
@@ -5,9 +6,13 @@ import { NeedYear, Card, CardHeader, Badge, EmptyState, resultTone } from '@/com
 import { SectionSwitcher } from '@/components/subject-switcher';
 import { OVERALL_LABEL, PASS_MIN_RATIO } from '@/lib/evaluate';
 
-export const metadata = { title: 'ผลการเรียน' };
+export const metadata = { title: 'ผลรายวิชา' };
 
-export default async function ResultsPage({
+/**
+ * ผลรายวิชา — the same attendance read one รอบเรียน at a time, for whoever
+ * teaches the วิชา. The ห้อง-first view a ครูประจำชั้น wants is at /results.
+ */
+export default async function SubjectResultsPage({
   searchParams,
 }: {
   searchParams: Promise<{ section?: string }>;
@@ -33,9 +38,12 @@ export default async function ResultsPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">ผลการเรียน</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">ผลรายวิชา</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            คำนวณอัตโนมัติจากการเช็คชื่อ · ปีการศึกษา {year.year} · เกณฑ์ผ่าน ≥ {Math.round(PASS_MIN_RATIO * 100)}%
+            คำนวณอัตโนมัติจากการเช็คชื่อ · ปีการศึกษา {year.year} · เกณฑ์ผ่าน ≥ {Math.round(PASS_MIN_RATIO * 100)}% ·{' '}
+            <Link href="/results" className="font-medium text-primary hover:underline">
+              ดูตามห้องหลัก
+            </Link>
           </p>
         </div>
         <SectionSwitcher sections={sections} current={section.id} />

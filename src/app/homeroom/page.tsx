@@ -1,22 +1,22 @@
-import { Users } from 'lucide-react';
+import Link from 'next/link';
+import { Users, FileDown, CalendarCheck } from 'lucide-react';
 import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { buildTranscripts } from '@/lib/transcript';
 import { listHomerooms, studentsByRoom, type Homeroom } from '@/lib/homeroom';
-import { classDaysOfYear } from '@/lib/subjects-for-user';
-import { Card, CardHeader, Badge, EmptyState, NeedYear, resultTone } from '@/components/ui';
+import { Card, CardHeader, Badge, Button, EmptyState, NeedYear, resultTone } from '@/components/ui';
+import { RoomSwitcher } from '@/components/room-switcher';
 import { OVERALL_LABEL } from '@/lib/evaluate';
-import { RoomSwitcher } from './room-switcher';
-import { ReportExport } from './report-export';
 
 export const metadata = { title: 'ห้องที่ปรึกษา' };
 
 /**
  * ห้องที่ปรึกษา — ครูเห็นเฉพาะห้องของตัวเอง, admin เลือกดูได้ทุกห้อง.
  *
- * Two separate controls on purpose: `?room=` picks the single ห้อง on screen
- * (one click to switch), while the export panel keeps its own multi-room tick
- * list. Sharing one control made changing rooms mean untickng the old one.
+ * Reading and printing are two different jobs and now live on two pages: this
+ * one shows a single ห้อง (`?room=`), and the PDF button hands off to
+ * /homeroom/report with that room pre-ticked. They used to share a screen, and
+ * the tick list of every room in the school crowded out the ห้อง being read.
  */
 export default async function HomeroomPage({
   searchParams,
@@ -40,7 +40,7 @@ export default async function HomeroomPage({
         <EmptyState
           icon={<Users className="size-8" strokeWidth={1.5} />}
           title={isAdmin ? 'ยังไม่มีห้องที่ปรึกษาในปีนี้' : 'คุณยังไม่ได้เป็นครูที่ปรึกษาห้องใด'}
-          hint="ระบบซิงก์ครูที่ปรึกษาจาก SchoolOS — หากคิดว่าผิดพลาด ติดต่อผู้ดูแล"
+          hint="ระบบซิงก์ครูที่ปรึกษาจาก SchoolOS ให้อัตโนมัติ — หากคิดว่าผิดพลาด ติดต่อผู้ดูแล"
         />
       </div>
     );
@@ -54,28 +54,14 @@ export default async function HomeroomPage({
   const shown: Homeroom[] = viewing ? [viewing] : rooms;
 
   const byRoom = await studentsByRoom(shown);
-  const [transcripts, classDays] = await Promise.all([
-    buildTranscripts(year, [...byRoom.values()].flat()),
-    isAdmin ? classDaysOfYear(year) : Promise.resolve([]),
-  ]);
+  const transcripts = await buildTranscripts(year, [...byRoom.values()].flat());
   const transcriptBy = new Map(transcripts.map((t) => [t.student.id, t]));
-  const months = [...new Set(classDays.map((d) => d.date.slice(0, 7)))];
 
   return (
     <div className="space-y-6">
-      <Header isAdmin={isAdmin} />
+      <Header isAdmin={isAdmin} viewing={viewing?.key ?? null} />
       {viewing ? (
-        <>
-          <RoomSwitcher rooms={rooms} current={viewing.key} />
-          {/* Keyed on the room in view: switching rooms should re-arm the export
-              on that room, never quietly leave the previous one ticked. */}
-          <ReportExport
-            key={viewing.key}
-            rooms={rooms}
-            months={months}
-            viewing={viewing.key}
-          />
-        </>
+        <RoomSwitcher rooms={rooms} current={viewing.key} basePath="/homeroom" />
       ) : null}
 
       {shown.map((room) => {
@@ -152,15 +138,33 @@ export default async function HomeroomPage({
   );
 }
 
-function Header({ isAdmin }: { isAdmin: boolean }) {
+function Header({ isAdmin, viewing }: { isAdmin: boolean; viewing?: string | null }) {
   return (
-    <div>
-      <h1 className="text-2xl font-semibold tracking-tight">ห้องที่ปรึกษา</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {isAdmin
-          ? 'เลือกห้องเพื่อดูว่านักเรียนเรียนวิชาเสริมอะไรและผ่าน/ไม่ผ่าน · การออกรายงาน PDF แยกอีกส่วนหนึ่ง เลือกได้หลายห้องโดยไม่กระทบห้องที่กำลังดู'
-          : 'ดูว่านักเรียนในห้องที่ปรึกษาของคุณเรียนวิชาเสริมอะไร และผ่าน/ไม่ผ่าน — อ่านอย่างเดียว'}
-      </p>
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">ห้องที่ปรึกษา</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {isAdmin
+            ? 'เลือกห้องเพื่อดูว่านักเรียนเรียนวิชาเสริมอะไรและผ่าน/ไม่ผ่าน'
+            : 'ดูว่านักเรียนในห้องที่ปรึกษาของคุณเรียนวิชาเสริมอะไร และผ่าน/ไม่ผ่าน — อ่านอย่างเดียว'}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Link href="/results">
+          <Button variant="outline">
+            <CalendarCheck className="size-4.5" strokeWidth={1.8} />
+            เวลาเข้าเรียน
+          </Button>
+        </Link>
+        {isAdmin ? (
+          <Link href={viewing ? `/homeroom/report?room=${encodeURIComponent(viewing)}` : '/homeroom/report'}>
+            <Button>
+              <FileDown className="size-4.5" strokeWidth={1.8} />
+              ออกรายงาน PDF
+            </Button>
+          </Link>
+        ) : null}
+      </div>
     </div>
   );
 }
