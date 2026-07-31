@@ -34,8 +34,21 @@ async function verifyPerson(
     verify = await schoolos.verify(type, username, password);
   } catch (e) {
     if (e instanceof SchoolOsError) {
+      // A rejected credential is how this endpoint answers normally: HTTP 401
+      // with `{valid:false, error:{code:'invalid_credentials'}}`. The client
+      // turns every non-2xx into a throw, so these statuses have to be sorted
+      // out here — reporting "เชื่อมต่อไม่สำเร็จ" for a mistyped password sends
+      // people to check the network instead of their password.
       if (e.status === 429)
         return { ok: false, error: 'พยายามเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่', status: 429 };
+      if (e.status === 401)
+        return { ok: false, error: 'รหัสผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง', status: 401 };
+      if (e.status === 403)
+        return {
+          ok: false,
+          error: e.message || 'บัญชีถูกปิดใช้งาน / พ้นสภาพแล้ว',
+          status: 403,
+        };
       return { ok: false, error: 'เชื่อมต่อ SchoolOS ไม่สำเร็จ', status: 502 };
     }
     return { ok: false, error: 'เกิดข้อผิดพลาด', status: 500 };

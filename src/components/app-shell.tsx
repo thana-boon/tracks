@@ -3,11 +3,19 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Menu, X, LogOut, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Menu, X, LogOut, PanelLeftClose, PanelLeft, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Avatar } from './avatar';
-import { navFor, roleLabel, type NavItem } from './nav-config';
+import {
+  navFor,
+  roleLabel,
+  isGroup,
+  itemsOf,
+  type NavEntry,
+  type NavGroup,
+  type NavItem,
+} from './nav-config';
 import type { AppRole } from '@/lib/session';
 
 export function AppShell({
@@ -109,6 +117,96 @@ export function AppShell({
   );
 }
 
+function NavLink({
+  item,
+  active,
+  collapsed,
+  nested = false,
+  onNavigate,
+}: {
+  item: NavItem;
+  active: boolean;
+  collapsed: boolean;
+  /** a link inside a group — indented under a rule, so it drops its icon */
+  nested?: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      aria-current={active ? 'page' : undefined}
+      title={collapsed ? item.label : undefined}
+      className={cn(
+        'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
+        collapsed && 'justify-center px-0',
+        nested && 'py-2',
+        active ? 'bg-white/15 text-white' : 'text-white/70 hover:bg-white/10 hover:text-white',
+      )}
+    >
+      {nested && !collapsed ? null : item.icon}
+      {!collapsed ? <span className="truncate">{item.label}</span> : null}
+    </Link>
+  );
+}
+
+/**
+ * A heading that opens onto its links. A shut group whose page is open keeps a
+ * faint highlight, so the menu still says where you are without being unfolded.
+ */
+function Group({
+  group,
+  open,
+  hasActive,
+  onToggle,
+  isActive,
+  onNavigate,
+}: {
+  group: NavGroup;
+  open: boolean;
+  hasActive: boolean;
+  onToggle: () => void;
+  isActive: (href: string) => boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={cn(
+          'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
+          hasActive && !open
+            ? 'bg-white/10 text-white'
+            : 'text-white/70 hover:bg-white/10 hover:text-white',
+        )}
+      >
+        {group.icon}
+        <span className="truncate">{group.label}</span>
+        <ChevronDown
+          className={cn('ml-auto size-4 shrink-0 transition-transform', open && 'rotate-180')}
+          strokeWidth={2}
+        />
+      </button>
+      {open ? (
+        <div className="ml-5 mt-1 space-y-0.5 border-l border-white/10 pl-2">
+          {group.items.map((item) => (
+            <NavLink
+              key={item.href}
+              item={item}
+              active={isActive(item.href)}
+              collapsed={false}
+              nested
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function SidebarContent({
   role,
   name,
@@ -124,7 +222,7 @@ function SidebarContent({
   name: string;
   firstName?: string;
   photoUrl?: string | null;
-  nav: NavItem[];
+  nav: NavEntry[];
   collapsed: boolean;
   onToggle?: () => void;
   onNavigate?: () => void;
@@ -132,6 +230,8 @@ function SidebarContent({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  /** Groups the user has opened or shut by hand; the rest follow the route. */
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -170,29 +270,55 @@ function SidebarContent({
         ) : null}
       </div>
 
+      {/*
+        Collapsed to icons there is no room for a heading, and a group would
+        cost a press to reach a link that is already one icon away — so the
+        narrow sidebar flattens, keeping only a rule where each group ended.
+      */}
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-        {nav.map((item) => {
-          const act = isActive(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onNavigate}
-              aria-current={act ? 'page' : undefined}
-              title={collapsed ? item.label : undefined}
-              className={cn(
-                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
-                collapsed && 'justify-center px-0',
-                act
-                  ? 'bg-white/15 text-white'
-                  : 'text-white/70 hover:bg-white/10 hover:text-white',
-              )}
-            >
-              {item.icon}
-              {!collapsed ? <span className="truncate">{item.label}</span> : null}
-            </Link>
-          );
-        })}
+        {collapsed
+          ? nav.map((entry, i) => (
+              <div
+                key={isGroup(entry) ? entry.label : entry.href}
+                className={cn('space-y-1', i > 0 && isGroup(entry) && 'mt-2 border-t border-white/8 pt-2')}
+              >
+                {itemsOf(entry).map((item) => (
+                  <NavLink
+                    key={item.href}
+                    item={item}
+                    active={isActive(item.href)}
+                    collapsed
+                    onNavigate={onNavigate}
+                  />
+                ))}
+              </div>
+            ))
+          : nav.map((entry) => {
+              if (!isGroup(entry))
+                return (
+                  <NavLink
+                    key={entry.href}
+                    item={entry}
+                    active={isActive(entry.href)}
+                    collapsed={false}
+                    onNavigate={onNavigate}
+                  />
+                );
+
+              const hasActive = entry.items.some((i) => isActive(i.href));
+              const open = toggled[entry.label] ?? hasActive;
+              return (
+                <Group
+                  key={entry.label}
+                  group={entry}
+                  open={open}
+                  hasActive={hasActive}
+                  onToggle={() => setToggled((t) => ({ ...t, [entry.label]: !open }))}
+                  isActive={isActive}
+                  onNavigate={onNavigate}
+                />
+              );
+            })}
       </nav>
 
       <div className="border-t border-white/8 p-3">

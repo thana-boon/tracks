@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardHeader, Button, Badge, EmptyState } from '@/components/ui';
+import { ClassDayCalendar } from '@/components/class-day-calendar';
 import {
   THAI_WEEKDAYS,
   thaiDateLong,
@@ -82,13 +83,19 @@ function Header() {
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">เช็คชื่อ</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        เลือกวัน → เลือกกลุ่มเรียน → กดมาทั้งหมดแล้วแก้เฉพาะคนที่ไม่มา · เช็คได้ทั้งเช้าและบ่าย
+        เปิดที่วันนี้ให้เลย → เลือกกลุ่มเรียน → กดมาทั้งหมดแล้วแก้เฉพาะคนที่ไม่มา · ย้อนไปวันอื่นได้ที่ปุ่ม
+        “เปลี่ยนวัน”
       </p>
     </div>
   );
 }
 
-/** Step 1 — the class days of the year, most recent first once they are past. */
+/**
+ * Step 1 — pick the day, from a calendar rather than a list.
+ *
+ * Reached only when today is not a class day, or when the teacher pressed
+ * เปลี่ยนวัน to go back and fix an older check-in.
+ */
 function DayList({
   days,
   today,
@@ -98,81 +105,17 @@ function DayList({
   today: string;
   onPick: (date: string) => void;
 }) {
-  const upcoming = days.filter((d) => d.date >= today);
-  const past = days.filter((d) => d.date < today).reverse();
-
   return (
     <Card>
       <CardHeader
         icon={<CalendarDays className="size-4.5" strokeWidth={1.8} />}
         title="เลือกวันที่จะเช็คชื่อ"
-        action={<Badge tone="secondary">{days.length} วัน</Badge>}
+        action={<Badge tone="secondary">ทั้งปี {days.length} วัน</Badge>}
       />
       <div className="px-4 pb-4 sm:px-5">
-        {upcoming.length > 0 ? (
-          <Section title="วันนี้และวันข้างหน้า">
-            {upcoming.map((d) => (
-              <DayRow key={d.date} day={d} today={today} onPick={onPick} />
-            ))}
-          </Section>
-        ) : null}
-        {past.length > 0 ? (
-          <Section title="ย้อนหลัง">
-            {past.map((d) => (
-              <DayRow key={d.date} day={d} today={today} onPick={onPick} />
-            ))}
-          </Section>
-        ) : null}
+        <ClassDayCalendar days={days} today={today} onPick={onPick} />
       </div>
     </Card>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mt-1">
-      <p className="px-1 pb-1 pt-3 text-xs font-medium text-muted-foreground">{title}</p>
-      <ul className="divide-y divide-border/60">{children}</ul>
-    </div>
-  );
-}
-
-function DayRow({
-  day,
-  today,
-  onPick,
-}: {
-  day: ClassDay;
-  today: string;
-  onPick: (date: string) => void;
-}) {
-  const isToday = day.date === today;
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={() => onPick(day.date)}
-        className="flex w-full items-center gap-3 rounded-lg px-2 py-3 text-left transition-colors hover:bg-secondary/50"
-      >
-        <span
-          className={cn(
-            'grid size-11 shrink-0 place-items-center rounded-xl text-sm font-bold tabular-nums',
-            isToday ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground',
-          )}
-        >
-          {Number(day.date.slice(-2))}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">วัน{THAI_WEEKDAYS[weekdayOfYmd(day.date)]}</span>
-            {isToday ? <Badge tone="primary">วันนี้</Badge> : null}
-          </span>
-          <span className="block text-xs text-muted-foreground">{thaiDateLong(day.date)}</span>
-        </span>
-        <span className="shrink-0 text-xs text-muted-foreground">{day.sectionCount} กลุ่ม</span>
-        <ChevronRight className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.8} />
-      </button>
-    </li>
   );
 }
 
