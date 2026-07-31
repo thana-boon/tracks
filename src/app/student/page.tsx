@@ -1,7 +1,7 @@
 import { BookOpen, CalendarClock, MapPin } from 'lucide-react';
 import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
-import { buildTranscripts } from '@/lib/transcript';
+import { buildYearResults } from '@/lib/transcript';
 import { classDatesOf } from '@/lib/data';
 import { db } from '@/db';
 import { registrations, subjectSections, trackSubjects } from '@/db/schema';
@@ -18,8 +18,8 @@ export default async function StudentHome() {
   if (!year) return <NeedYear />;
   if (!user.personId) return <EmptyState title="ไม่พบข้อมูลนักเรียน" hint="ติดต่อผู้ดูแล" />;
 
-  const [transcript] = await buildTranscripts(year, [user.personId]);
-  const lines = transcript?.lines ?? [];
+  const [results] = await buildYearResults(year, [user.personId]);
+  const lines = results?.lines ?? [];
 
   // Class days per section the student sits in, keyed the same way its
   // transcript line is — two รอบ of one วิชา have different days.
@@ -42,7 +42,7 @@ export default async function StudentHome() {
         <p className="text-xs font-medium uppercase tracking-wide text-white/60">วิชาเสริม ปีการศึกษา {year.year}</p>
         <h1 className="mt-1 text-2xl font-semibold">{user.name}</h1>
         <p className="mt-1 text-sm text-white/70">
-          {transcript?.student.gradeLevel}/{transcript?.student.classroom} · ลงวิชาเสริม {lines.length} วิชา
+          {results?.student.gradeLevel}/{results?.student.classroom} · ลงวิชาเสริม {lines.length} วิชา
         </p>
         <div className="mt-4 h-0.5 w-10 rounded-full bg-[#F5C518]" />
       </section>

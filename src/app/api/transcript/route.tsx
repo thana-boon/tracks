@@ -1,19 +1,29 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { renderToBuffer } from '@react-pdf/renderer';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { classroomStudents, people, registrations } from '@/db/schema';
+import { people } from '@/db/schema';
 import { currentUser } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { buildTranscripts } from '@/lib/transcript';
+import { docSettings } from '@/lib/doc-settings';
 import { TranscriptDocument } from '@/lib/pdf-transcript';
 
 export const runtime = 'nodejs';
 
+/** Above this the render is slow enough that the browser looks hung. */
+const MAX_STUDENTS = 600;
+
 /**
  * GET /api/transcript — one A4 page per student (spec §4.6).
- * Scope (choose one): ?grade=ม.4[&room=1] · ?subject=<id> · ?classroom=<id>
- * Admin only. Year defaults to the active one.
+ *
+ * Scope, choose one:
+ *   ?grade=ม.4[&room=1]   a homeroom, or a whole grade
+ *   ?students=1,2,3       hand-picked — reprints and one-off requests
+ *
+ * Admin only. The active year decides *which students* are printed; the
+ * document itself always accumulates every year the student has studied, so a
+ * ม.6 sheet carries their ม.4 and ม.5 subjects too.
  */
 export async function GET(req: NextRequest) {
   const user = await currentUser();
@@ -26,26 +36,21 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const grade = (sp.get('grade') ?? '').trim();
   const room = (sp.get('room') ?? '').trim();
-  const subjectId = Number(sp.get('subject')) || 0;
-  const classroomId = Number(sp.get('classroom')) || 0;
+  const picked = [
+    ...new Set(
+      (sp.get('students') ?? '')
+        .split(',')
+        .map((v) => Number(v.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0),
+    ),
+  ];
 
-  let studentIds: number[] = [];
-  let label = '';
+  let studentIds: number[];
+  let label: string;
 
-  if (subjectId > 0) {
-    const rows = await db
-      .select({ id: registrations.studentId })
-      .from(registrations)
-      .where(and(eq(registrations.subjectId, subjectId), eq(registrations.yearId, year.id), isNull(registrations.droppedAt)));
-    studentIds = rows.map((r) => r.id);
-    label = 'ตามวิชา';
-  } else if (classroomId > 0) {
-    const rows = await db
-      .select({ id: classroomStudents.studentId })
-      .from(classroomStudents)
-      .where(eq(classroomStudents.classroomId, classroomId));
-    studentIds = rows.map((r) => r.id);
-    label = 'ตามห้องเรียนพิเศษ';
+  if (picked.length > 0) {
+    studentIds = picked;
+    label = 'รายบุคคล';
   } else if (grade) {
     const conds = [eq(people.type, 'student'), eq(people.gradeLevel, grade)];
     if (room) conds.push(eq(people.classroom, room));
@@ -58,17 +63,30 @@ export async function GET(req: NextRequest) {
 
   if (studentIds.length === 0)
     return NextResponse.json({ error: 'no students' }, { status: 404 });
-  if (studentIds.length > 600)
+  if (studentIds.length > MAX_STUDENTS)
     return NextResponse.json({ error: 'scope too large' }, { status: 400 });
 
-  const transcripts = await buildTranscripts(year, studentIds);
+  const [transcripts, settings] = await Promise.all([
+    buildTranscripts(studentIds),
+    docSettings(),
+  ]);
+  // `students=` is caller-supplied: ids that are not students of this school
+  // simply drop out of the build, and a document of nothing is not a document.
+  if (transcripts.length === 0)
+    return NextResponse.json({ error: 'no students' }, { status: 404 });
+
   const buffer = await renderToBuffer(
-    <TranscriptDocument transcripts={transcripts} yearLabel={`ปีการศึกษา ${year.year}`} />,
+    <TranscriptDocument transcripts={transcripts} settings={settings} />,
   );
 
-  // Content-Disposition is Latin-1 only; the Thai `label` would throw. Give an
-  // ASCII fallback filename plus an RFC 5987 filename* carrying the Thai name.
-  const utf8 = encodeURIComponent(`ทรานสคริปต์-${label || 'ทั้งหมด'}.pdf`);
+  // A single sheet is nearly always a reprint for one student, so name the file
+  // after them — that is what makes it findable in the Downloads folder later.
+  const only = transcripts.length === 1 ? transcripts[0].student : null;
+  const name = only ? `ทรานสคริปต์-${only.code}-${only.fullName}` : `ทรานสคริปต์-${label}`;
+
+  // Content-Disposition is Latin-1 only; the Thai name would throw. Give an
+  // ASCII fallback filename plus an RFC 5987 filename* carrying the Thai one.
+  const utf8 = encodeURIComponent(`${name}.pdf`);
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       'Content-Type': 'application/pdf',

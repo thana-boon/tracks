@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Users, FileDown, CalendarCheck } from 'lucide-react';
 import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
-import { buildTranscripts } from '@/lib/transcript';
+import { buildYearResults } from '@/lib/transcript';
 import { listHomerooms, studentsByRoom, type Homeroom } from '@/lib/homeroom';
 import { Card, CardHeader, Badge, Button, EmptyState, NeedYear, resultTone } from '@/components/ui';
 import { RoomSwitcher } from '@/components/room-switcher';
@@ -54,8 +54,8 @@ export default async function HomeroomPage({
   const shown: Homeroom[] = viewing ? [viewing] : rooms;
 
   const byRoom = await studentsByRoom(shown);
-  const transcripts = await buildTranscripts(year, [...byRoom.values()].flat());
-  const transcriptBy = new Map(transcripts.map((t) => [t.student.id, t]));
+  const results = await buildYearResults(year, [...byRoom.values()].flat());
+  const transcriptBy = new Map(results.map((t) => [t.student.id, t]));
 
   return (
     <div className="space-y-6">

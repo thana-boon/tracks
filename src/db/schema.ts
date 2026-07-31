@@ -317,6 +317,36 @@ export const attendance = pgTable(
   ],
 );
 
+// ── ตั้งค่าเอกสาร: the letterhead a printed transcript carries ──
+// A singleton row (id is always 1). The school's crest, the two people who sign
+// a transcript, and their titles are not code — a new ผอ. arrives and the
+// document has to follow without a redeploy, so they live here and the หน้า
+// ตั้งค่าเอกสาร edits them.
+//
+// Images are stored inline as `data:image/…;base64,…` rather than as files on
+// disk: there are at most three of them, they are small, and keeping them in
+// the row means pg_dump backs them up with everything else instead of leaving
+// a signed document that cannot be reprinted after a restore.
+export const documentSettings = pgTable('document_settings', {
+  id: integer('id').primaryKey(),
+  schoolName: text('school_name').notNull(),
+  documentTitle: text('document_title').notNull(),
+  /** ข้อความใต้หัวเรื่อง — e.g. "ระเบียนสะสมวิชาเสริม ม.4-6" */
+  documentSubtitle: text('document_subtitle'),
+  /** ตราโรงเรียน, data URL */
+  logo: text('logo'),
+  directorName: text('director_name'),
+  directorTitle: text('director_title').notNull(),
+  /** ลายเซ็นผู้อำนวยการ, data URL */
+  directorSignature: text('director_signature'),
+  registrarName: text('registrar_name'),
+  registrarTitle: text('registrar_title').notNull(),
+  /** ลายเซ็นนายทะเบียนวัดผล, data URL */
+  registrarSignature: text('registrar_signature'),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // ── activity logs ────────────────────────────────────────────
 export const activityLogs = pgTable(
   'activity_logs',

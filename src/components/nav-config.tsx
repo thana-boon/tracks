@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   CalendarCheck,
   Settings2,
+  Stamp,
   Wrench,
 } from 'lucide-react';
 import type { AppRole } from '@/lib/session';
@@ -48,7 +49,7 @@ export function itemsOf(entry: NavEntry): NavItem[] {
 const sw = 1.7;
 
 /**
- * An admin has seventeen screens, which is a scroll rather than a menu when
+ * An admin has eighteen screens, which is a scroll rather than a menu when
  * laid out flat. They group cleanly by *when in the year they are used*: set the
  * year up, take attendance through it, read the results out, and the handful of
  * caretaker screens that are nobody's daily work. Only ภาพรวม stays loose at the
@@ -96,6 +97,7 @@ export function navFor(role: AppRole): NavEntry[] {
         label: 'ดูแลระบบ',
         icon: <Wrench className="size-5" strokeWidth={sw} />,
         items: [
+          { href: '/admin/settings', label: 'ตั้งค่าเอกสาร', icon: <Stamp className="size-5" strokeWidth={sw} /> },
           { href: '/admin/permissions', label: 'สิทธิ์ผู้ดูแล', icon: <ShieldCheck className="size-5" strokeWidth={sw} /> },
           { href: '/admin/backup', label: 'สำรองข้อมูล', icon: <DatabaseBackup className="size-5" strokeWidth={sw} /> },
           { href: '/admin/logs', label: 'ประวัติการใช้งาน', icon: <ScrollText className="size-5" strokeWidth={sw} /> },

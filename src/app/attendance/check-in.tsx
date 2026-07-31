@@ -20,7 +20,9 @@ import { Card, CardHeader, Button, Badge, EmptyState } from '@/components/ui';
 import { ClassDayCalendar } from '@/components/class-day-calendar';
 import {
   THAI_WEEKDAYS,
+  THAI_WEEKDAYS_SHORT,
   thaiDateLong,
+  thaiDateShort,
   weekdayOfYmd,
   cn,
 } from '@/lib/utils';
@@ -31,6 +33,12 @@ import { loadSectionsOnDate, loadDayRoster, saveDayAttendance } from './actions'
 
 type Slot = 'morning' | 'afternoon';
 
+/**
+ * เช็คชื่อ is done standing in the room with a phone in one hand, so this whole
+ * flow is laid out for a 360px screen first and only spreads out on a desktop:
+ * no sideways scrolling, thumb-sized มา/ไม่มา buttons, and บันทึก pinned to the
+ * bottom of the screen so a class of forty never puts it out of reach.
+ */
 export function CheckIn({
   days,
   today,
@@ -48,7 +56,7 @@ export function CheckIn({
 
   if (days.length === 0) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         <Header />
         <EmptyState
           icon={<ClipboardCheck className="size-8" strokeWidth={1.5} />}
@@ -60,7 +68,7 @@ export function CheckIn({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <Header />
       {date === null ? (
         <DayList days={days} today={today} onPick={setDate} />
@@ -81,10 +89,10 @@ export function CheckIn({
 function Header() {
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">เช็คชื่อ</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        เปิดที่วันนี้ให้เลย → เลือกกลุ่มเรียน → กดมาทั้งหมดแล้วแก้เฉพาะคนที่ไม่มา · ย้อนไปวันอื่นได้ที่ปุ่ม
-        “เปลี่ยนวัน”
+      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">เช็คชื่อ</h1>
+      <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
+        เลือกกลุ่มเรียน → กด “มาทั้งหมด” แล้วแก้เฉพาะคนที่ไม่มา
+        <span className="hidden sm:inline"> · ย้อนไปวันอื่นได้ที่ปุ่ม “เปลี่ยนวัน”</span>
       </p>
     </div>
   );
@@ -112,14 +120,20 @@ function DayList({
         title="เลือกวันที่จะเช็คชื่อ"
         action={<Badge tone="secondary">ทั้งปี {days.length} วัน</Badge>}
       />
-      <div className="px-4 pb-4 sm:px-5">
+      <div className="px-3 pb-4 sm:px-5">
         <ClassDayCalendar days={days} today={today} onPick={onPick} />
       </div>
     </Card>
   );
 }
 
-/** Step 2 — what meets that day, where, and how far the check-in has got. */
+/**
+ * Step 2 — what meets that day, where, and how far the check-in has got.
+ *
+ * On a phone each กลุ่ม is a full-width stack — subject, then where and how
+ * many, then how far the two slots have got — rather than columns squeezed
+ * against a chevron.
+ */
 function SectionList({
   date,
   onBack,
@@ -143,16 +157,26 @@ function SectionList({
   return (
     <Card>
       <CardHeader
+        className="p-3 sm:p-5"
         icon={<ClipboardCheck className="size-4.5" strokeWidth={1.8} />}
-        title={`วัน${THAI_WEEKDAYS[weekdayOfYmd(date)]}ที่ ${thaiDateLong(date)}`}
+        title={
+          <>
+            <span className="sm:hidden">
+              {THAI_WEEKDAYS_SHORT[weekdayOfYmd(date)]} {thaiDateShort(date)}
+            </span>
+            <span className="hidden sm:inline">
+              วัน{THAI_WEEKDAYS[weekdayOfYmd(date)]}ที่ {thaiDateLong(date)}
+            </span>
+          </>
+        }
         action={
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" className="px-2 sm:px-3" onClick={onBack}>
             <ArrowLeft className="size-4" strokeWidth={1.9} />
             เปลี่ยนวัน
           </Button>
         }
       />
-      <div className="px-4 pb-4 sm:px-5">
+      <div className="px-2 pb-3 sm:px-5 sm:pb-4">
         {loading || !sections ? (
           <Spinner />
         ) : sections.length === 0 ? (
@@ -164,18 +188,17 @@ function SectionList({
                 <button
                   type="button"
                   onClick={() => onPick(s)}
-                  className="flex w-full items-center gap-3 rounded-lg px-2 py-3 text-left transition-colors hover:bg-secondary/50"
+                  className="flex w-full touch-manipulation items-center gap-3 rounded-xl px-2 py-3 text-left transition-colors hover:bg-secondary/50 active:bg-secondary/70"
                 >
                   <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-secondary text-xs font-bold text-secondary-foreground">
                     {s.subjectCode}
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2">
+                  <span className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="truncate font-medium">{s.subjectName}</span>
                       <Badge tone="navy">{s.name}</Badge>
                     </span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                      <span>{s.groupCode}</span>
+                    <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <MapPin className="size-3.5" strokeWidth={1.8} />
                         {s.room ?? 'ยังไม่ระบุห้อง'}
@@ -184,14 +207,17 @@ function SectionList({
                         <Users className="size-3.5" strokeWidth={1.8} />
                         {s.studentCount} คน
                       </span>
-                      {s.teacherName ? <span>ครู {s.teacherName}</span> : null}
+                      <span className="hidden sm:inline">{s.groupCode}</span>
+                      {s.teacherName ? (
+                        <span className="hidden sm:inline">ครู {s.teacherName}</span>
+                      ) : null}
+                    </span>
+                    <span className="flex flex-wrap gap-1.5">
+                      <SlotChip label="เช้า" done={s.morningChecked} />
+                      <SlotChip label="บ่าย" done={s.afternoonChecked} />
                     </span>
                   </span>
-                  <span className="flex shrink-0 flex-col items-end gap-1">
-                    <SlotChip label="เช้า" done={s.morningChecked} />
-                    <SlotChip label="บ่าย" done={s.afternoonChecked} />
-                  </span>
-                  <ChevronRight className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+                  <ChevronRight className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.8} />
                 </button>
               </li>
             ))}
@@ -219,6 +245,11 @@ function SlotChip({ label, done }: { label: string; done: boolean }) {
  * Step 3 — the roster for one รอบเรียน on one day. Both slots live on the same
  * screen: a teacher presses มาทั้งหมด for the slot and then fixes the handful
  * who were away, which is how the check actually happens in the room.
+ *
+ * The roster is a list rather than a table — a table wide enough for both slots
+ * has to be scrolled sideways on a phone, which is exactly the screen this is
+ * filled in on. บันทึก sits in a bar stuck to the bottom of the screen so it is
+ * always one press away, however far down the list the teacher has got.
  *
  * A slot only gets written once it has been touched — an untouched afternoon
  * stays unrecorded rather than being saved as everyone-absent.
@@ -318,33 +349,40 @@ function RosterEditor({
   const bothDone = touched.morning && touched.afternoon;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       <Card>
-        <CardHeader
-          icon={<ClipboardCheck className="size-4.5" strokeWidth={1.8} />}
-          title={
-            <span className="flex flex-wrap items-center gap-2">
-              {section.subjectCode} — {section.subjectName}
+        <div className="flex items-start gap-3 p-3 sm:p-5">
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+            <ClipboardCheck className="size-4.5" strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold sm:text-base">
+              <span className="min-w-0 truncate">
+                {section.subjectCode} — {section.subjectName}
+              </span>
               <Badge tone="navy">{section.name}</Badge>
-            </span>
-          }
-          action={
-            <Button variant="ghost" size="sm" onClick={onBack}>
-              <ArrowLeft className="size-4" strokeWidth={1.9} />
-              เปลี่ยนกลุ่ม
-            </Button>
-          }
-        />
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pb-4 text-xs text-muted-foreground sm:px-5">
-          <span className="flex items-center gap-1">
-            <CalendarDays className="size-3.5" strokeWidth={1.8} />
-            วัน{THAI_WEEKDAYS[weekdayOfYmd(date)]}ที่ {thaiDateLong(date)}
-          </span>
-          <span className="flex items-center gap-1">
-            <MapPin className="size-3.5" strokeWidth={1.8} />
-            {section.room ?? 'ยังไม่ระบุห้อง'}
-          </span>
-          {section.teacherName ? <span>ครู {section.teacherName}</span> : null}
+            </h2>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <CalendarDays className="size-3.5" strokeWidth={1.8} />
+                <span className="sm:hidden">
+                  {THAI_WEEKDAYS_SHORT[weekdayOfYmd(date)]} {thaiDateShort(date)}
+                </span>
+                <span className="hidden sm:inline">
+                  วัน{THAI_WEEKDAYS[weekdayOfYmd(date)]}ที่ {thaiDateLong(date)}
+                </span>
+              </span>
+              <span className="flex items-center gap-1">
+                <MapPin className="size-3.5" strokeWidth={1.8} />
+                {section.room ?? 'ยังไม่ระบุห้อง'}
+              </span>
+              {section.teacherName ? <span>ครู {section.teacherName}</span> : null}
+            </div>
+          </div>
+          <Button variant="ghost" size="sm" className="shrink-0 px-2 sm:px-3" onClick={onBack}>
+            <ArrowLeft className="size-4" strokeWidth={1.9} />
+            <span className="hidden sm:inline">เปลี่ยนกลุ่ม</span>
+          </Button>
         </div>
       </Card>
 
@@ -360,7 +398,29 @@ function RosterEditor({
       ) : (
         <>
           <Card>
-            <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
+            <div className="flex flex-wrap gap-2 p-3 sm:p-5 sm:pb-3">
+              <Button
+                size="sm"
+                className="flex-1 whitespace-nowrap px-2 sm:flex-none sm:px-3"
+                onClick={() => setWholeDay(true)}
+              >
+                <CheckCircle2 className="size-4 shrink-0" strokeWidth={1.9} />
+                <span className="hidden sm:inline">ทุกคน</span>มาทั้งวัน
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1 whitespace-nowrap px-2 sm:flex-none sm:px-3"
+                onClick={() => setWholeDay(false)}
+              >
+                <XCircle className="size-4 shrink-0" strokeWidth={1.9} />
+                <span className="hidden sm:inline">ทุกคน</span>ไม่มาทั้งวัน
+              </Button>
+              <span className="hidden self-center text-xs text-muted-foreground sm:ml-auto sm:block">
+                กดมาทั้งหมดก่อน แล้วค่อยกดแก้เฉพาะคนที่ไม่มา
+              </span>
+            </div>
+            <div className="grid gap-2.5 border-t border-border/60 p-3 sm:grid-cols-2 sm:gap-3 sm:p-5">
               <SlotControls
                 slot="morning"
                 touched={touched.morning}
@@ -376,95 +436,55 @@ function RosterEditor({
                 onAll={setAll}
               />
             </div>
-            <div className="flex flex-wrap gap-2 border-t border-border/60 px-4 py-3 sm:px-5">
-              <Button size="sm" onClick={() => setWholeDay(true)}>
-                <CheckCircle2 className="size-4" strokeWidth={1.9} />
-                มาทั้งหมด ทั้งวัน
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setWholeDay(false)}>
-                <XCircle className="size-4" strokeWidth={1.9} />
-                ไม่มาทั้งหมด ทั้งวัน
-              </Button>
-              <span className="ml-auto self-center text-xs text-muted-foreground">
-                กดมาทั้งหมดก่อน แล้วค่อยกดแก้เฉพาะคนที่ไม่มา
-              </span>
-            </div>
           </Card>
 
           <Card>
             <CardHeader
+              className="p-3 sm:p-5"
               icon={<Users className="size-4.5" strokeWidth={1.8} />}
-              title={`รายชื่อนักเรียน ${roster.length} คน`}
+              title={`รายชื่อ ${roster.length} คน`}
               action={
                 bothDone ? (
-                  <Badge tone="success">ประเมินผลของวันนี้แล้ว</Badge>
+                  <Badge tone="success">ประเมินผลแล้ว</Badge>
                 ) : (
-                  <Badge tone="secondary">เช็คให้ครบเช้า-บ่ายเพื่อประเมินผล</Badge>
+                  <Badge tone="secondary">เช็คให้ครบเช้า-บ่าย</Badge>
                 )
               }
             />
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead>
-                  <tr className="border-b border-border text-xs text-muted-foreground">
-                    <th className="w-10 py-2 pl-4 pr-1 text-center font-medium" title="ลำดับเดียวกับใบเช็คชื่อที่พิมพ์">
-                      ที่
-                    </th>
-                    <th className="w-12 px-1 py-2 text-center font-medium" title="เลขที่ในห้องเรียนของนักเรียน">
-                      เลขที่
-                    </th>
-                    <th className="px-3 py-2 text-left font-medium">นักเรียน</th>
-                    <th className="px-2 py-2 text-center font-medium">เช้า</th>
-                    <th className="px-2 py-2 text-center font-medium">บ่าย</th>
-                    <th className="px-3 py-2 text-center font-medium">ผลของวัน</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {roster.map((e, i) => {
-                    const m = touched.morning ? marks.morning.get(e.studentId) ?? false : null;
-                    const a = touched.afternoon ? marks.afternoon.get(e.studentId) ?? false : null;
-                    return (
-                      <tr key={e.studentId} className="hover:bg-secondary/40">
-                        <td className="py-2 pl-4 pr-1 text-center text-xs text-muted-foreground tabular-nums">
-                          {i + 1}
-                        </td>
-                        <td className="px-1 py-2 text-center font-medium tabular-nums">
-                          {e.classNumber ?? <span className="text-muted-foreground">—</span>}
-                        </td>
-                        <td className="px-3 py-2">
-                          <p className="truncate font-medium">
-                            {e.fullName}
-                            {e.nickname ? (
-                              <span className="font-normal text-muted-foreground"> ({e.nickname})</span>
-                            ) : null}
-                          </p>
-                          <p className="text-xs text-muted-foreground tabular-nums">
-                            {e.code} · {e.gradeLevel}/{e.classroom}
-                          </p>
-                        </td>
-                        <td className="px-2 py-2">
-                          <SlotToggle
-                            value={m}
-                            onSet={(v) => setOne('morning', e.studentId, v)}
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <SlotToggle
-                            value={a}
-                            onSet={(v) => setOne('afternoon', e.studentId, v)}
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <OutcomeBadge morning={m} afternoon={a} ready={bothDone} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="border-t border-border/60 p-4 sm:p-5">
-              <Button className="w-full" onClick={submit} disabled={saving}>
+            <ul className="divide-y divide-border/60 border-t border-border/60">
+              {roster.map((e, i) => {
+                const m = touched.morning ? marks.morning.get(e.studentId) ?? false : null;
+                const a = touched.afternoon ? marks.afternoon.get(e.studentId) ?? false : null;
+                return (
+                  <RosterRow
+                    key={e.studentId}
+                    order={i + 1}
+                    entry={e}
+                    morning={m}
+                    afternoon={a}
+                    ready={bothDone}
+                    onSet={(slot, v) => setOne(slot, e.studentId, v)}
+                  />
+                );
+              })}
+            </ul>
+
+            {/*
+              Pinned to the bottom of the screen for as long as the roster is on
+              it: with forty students the old footer button was a long scroll
+              away from whichever row was just fixed.
+            */}
+            <div className="sticky bottom-0 z-20 rounded-b-2xl border-t border-border/60 bg-card/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur sm:flex sm:items-center sm:gap-4 sm:p-5">
+              <p className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:mb-0 sm:flex-1">
+                <SavedCount slot="morning" touched={touched.morning} present={present('morning')} total={roster.length} />
+                <SavedCount slot="afternoon" touched={touched.afternoon} present={present('afternoon')} total={roster.length} />
+              </p>
+              <Button
+                size="lg"
+                className="w-full sm:w-auto"
+                onClick={submit}
+                disabled={saving}
+              >
                 {saving ? (
                   <Loader2 className="size-4.5 animate-spin" />
                 ) : (
@@ -472,17 +492,72 @@ function RosterEditor({
                 )}
                 บันทึกเช็คชื่อ
               </Button>
-              <p className="mt-2 text-center text-xs text-muted-foreground">
-                มาแค่เช้าหรือบ่าย = ผ่าน · มาครบทั้งวัน = ยอดเยี่ยม · ไม่มาเลย = ไม่ผ่าน
-              </p>
-              <p className="mt-1 text-center text-xs text-muted-foreground">
-                คอลัมน์ “ที่” เรียงลำดับเดียวกับใบเช็คชื่อที่พิมพ์ · “เลขที่” คือเลขที่ห้องจริงของนักเรียน
-              </p>
             </div>
           </Card>
+
+          <p className="px-1 pb-1 text-center text-xs text-muted-foreground">
+            มาแค่เช้าหรือบ่าย = ผ่าน · มาครบทั้งวัน = ยอดเยี่ยม · ไม่มาเลย = ไม่ผ่าน
+            <span className="hidden sm:inline">
+              {' '}
+              · คอลัมน์ “ที่” เรียงลำดับเดียวกับใบเช็คชื่อที่พิมพ์ · “เลขที่” คือเลขที่ห้องจริงของนักเรียน
+            </span>
+          </p>
         </>
       )}
     </div>
+  );
+}
+
+/** One student. Phone: name on top, both slots on a full-width second line. */
+function RosterRow({
+  order,
+  entry,
+  morning,
+  afternoon,
+  ready,
+  onSet,
+}: {
+  order: number;
+  entry: DayRosterEntry;
+  morning: boolean | null;
+  afternoon: boolean | null;
+  ready: boolean;
+  onSet: (slot: Slot, value: boolean) => void;
+}) {
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:flex-nowrap sm:gap-x-4 sm:px-5 sm:py-2 sm:hover:bg-secondary/40">
+      {/* ลำดับเดียวกับใบเช็คชื่อที่พิมพ์ — a phone has no room for it */}
+      <span
+        className="hidden w-6 shrink-0 text-center text-xs text-muted-foreground tabular-nums sm:block"
+        title="ลำดับเดียวกับใบเช็คชื่อที่พิมพ์"
+      >
+        {order}
+      </span>
+      <span
+        className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary text-sm font-semibold text-secondary-foreground tabular-nums"
+        title="เลขที่ในห้องเรียน"
+      >
+        {entry.classNumber ?? <span className="text-muted-foreground">—</span>}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">
+          {entry.fullName}
+          {entry.nickname ? (
+            <span className="font-normal text-muted-foreground"> ({entry.nickname})</span>
+          ) : null}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground tabular-nums">
+          {entry.code} · {entry.gradeLevel}/{entry.classroom}
+        </span>
+      </span>
+      <span className="shrink-0 sm:order-2 sm:w-24 sm:text-right">
+        <OutcomeBadge morning={morning} afternoon={afternoon} ready={ready} />
+      </span>
+      <span className="flex basis-full items-center gap-2 sm:order-1 sm:basis-auto sm:gap-3">
+        <SlotToggle slot="morning" student={entry.fullName} value={morning} onSet={onSet} />
+        <SlotToggle slot="afternoon" student={entry.fullName} value={afternoon} onSet={onSet} />
+      </span>
+    </li>
   );
 }
 
@@ -501,7 +576,7 @@ function SlotControls({
 }) {
   const isMorning = slot === 'morning';
   return (
-    <div className="rounded-xl border border-border p-3.5">
+    <div className="rounded-xl border border-border p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-sm font-medium">
           {isMorning ? (
@@ -519,11 +594,11 @@ function SlotControls({
           <Badge tone="secondary">ยังไม่เช็ค</Badge>
         )}
       </div>
-      <div className="mt-3 flex gap-2">
+      <div className="mt-2.5 flex gap-2">
         <Button size="sm" variant="secondary" className="flex-1" onClick={() => onAll(slot, true)}>
           มาทั้งหมด
         </Button>
-        <Button size="sm" variant="ghost" className="flex-1" onClick={() => onAll(slot, false)}>
+        <Button size="sm" variant="outline" className="flex-1" onClick={() => onAll(slot, false)}>
           ไม่มาทั้งหมด
         </Button>
       </div>
@@ -531,18 +606,69 @@ function SlotControls({
   );
 }
 
+/** What the save bar reports for one slot. */
+function SavedCount({
+  slot,
+  touched,
+  present,
+  total,
+}: {
+  slot: Slot;
+  touched: boolean;
+  present: number;
+  total: number;
+}) {
+  const isMorning = slot === 'morning';
+  const Icon = isMorning ? Sun : Moon;
+  return (
+    <span className="flex items-center gap-1.5">
+      <Icon className="size-3.5" strokeWidth={1.8} />
+      {isMorning ? 'เช้า' : 'บ่าย'}{' '}
+      {touched ? (
+        <span className="font-medium text-foreground tabular-nums">
+          มา {present}/{total}
+        </span>
+      ) : (
+        'ยังไม่เช็ค'
+      )}
+    </span>
+  );
+}
+
+/**
+ * มา / ไม่มา for one slot of one student, with the slot's own icon so the pair
+ * reads without a column heading — there are no columns on a phone.
+ */
 function SlotToggle({
+  slot,
+  student,
   value,
   onSet,
 }: {
+  slot: Slot;
+  /** only read out — thirty rows of a bare “มา” tell a screen reader nothing */
+  student: string;
   value: boolean | null;
-  onSet: (v: boolean) => void;
+  onSet: (slot: Slot, value: boolean) => void;
 }) {
+  const Icon = slot === 'morning' ? Sun : Moon;
+  const label = `ช่วง${slot === 'morning' ? 'เช้า' : 'บ่าย'} · ${student}`;
   return (
-    <div className="flex justify-center gap-1">
-      <PresenceButton active={value === true} tone="present" onClick={() => onSet(true)} />
-      <PresenceButton active={value === false} tone="absent" onClick={() => onSet(false)} />
-    </div>
+    <span className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-secondary/40 py-1.5 sm:flex-none sm:bg-transparent sm:py-0">
+      <Icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+      <PresenceButton
+        active={value === true}
+        tone="present"
+        label={label}
+        onClick={() => onSet(slot, true)}
+      />
+      <PresenceButton
+        active={value === false}
+        tone="absent"
+        label={label}
+        onClick={() => onSet(slot, false)}
+      />
+    </span>
   );
 }
 
@@ -569,21 +695,25 @@ function OutcomeBadge({
 function PresenceButton({
   active,
   tone,
+  label,
   onClick,
 }: {
   active: boolean;
   tone: 'present' | 'absent';
+  /** what this button is for, appended to มา/ไม่มา */
+  label?: string;
   onClick: () => void;
 }) {
   const Icon = tone === 'present' ? CheckCircle2 : XCircle;
+  const verb = tone === 'present' ? 'มา' : 'ไม่มา';
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={tone === 'present' ? 'มา' : 'ไม่มา'}
+      aria-label={label ? `${verb} — ${label}` : verb}
       aria-pressed={active}
       className={cn(
-        'grid size-9 place-items-center rounded-lg border transition-colors',
+        'grid size-10 shrink-0 touch-manipulation place-items-center rounded-lg border transition-colors active:scale-95 sm:size-9',
         active
           ? tone === 'present'
             ? 'border-success bg-success/10 text-success'
