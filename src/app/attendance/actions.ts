@@ -26,6 +26,13 @@ const SaveInput = z.object({
   afternoon: SlotRecords,
 });
 
+const ClearInput = z.object({
+  sectionId: z.number().int().positive(),
+  date: z.string(),
+  /** omitted = clear both slots of that day */
+  slot: z.enum(['morning', 'afternoon']).optional(),
+});
+
 /** The รอบเรียน meeting on one date — step 2 of the check-in flow. */
 export async function loadSectionsOnDate(
   date: string,
@@ -129,4 +136,59 @@ export async function saveDayAttendance(
   revalidatePath('/attendance');
   revalidatePath('/attendance/view');
   return { ok: true, message: `บันทึกเช็คชื่อแล้ว — มา ${parts.join(' · ')} คน` };
+}
+
+/**
+ * Erase a recorded check-in — one slot, or the whole day.
+ *
+ * A wrong press cannot be undone by saving over it: มา and ไม่มา are the only
+ * two values the roster can express, so a slot checked by mistake stays checked
+ * forever. Deleting the rows puts the day back to ยังไม่เช็ค, which is what a
+ * teacher who picked the wrong กลุ่ม actually wants — and it is the same thing
+ * ผลเช็คชื่อ reads, so the day stops counting towards ผ่าน/ไม่ผ่าน too.
+ */
+export async function clearDayAttendance(
+  input: z.infer<typeof ClearInput>,
+): Promise<ActionResult> {
+  const user = await requireRole('admin', 'teacher');
+  const parsed = ClearInput.safeParse(input);
+  if (!parsed.success) return { ok: false, message: 'ข้อมูลไม่ถูกต้อง' };
+  const year = await activeYear();
+  if (!year) return { ok: false, message: 'ยังไม่ได้ซิงก์ปีการศึกษา' };
+  const ymd = normalizeYmd(parsed.data.date);
+  if (!ymd) return { ok: false, message: 'วันที่ไม่ถูกต้อง' };
+
+  const { sectionId, slot } = parsed.data;
+
+  // Same guard as saving: the section has to be one of this year's.
+  const [section] = await db
+    .select({ id: subjectSections.id })
+    .from(subjectSections)
+    .where(and(eq(subjectSections.id, sectionId), eq(subjectSections.yearId, year.id)))
+    .limit(1);
+  if (!section) return { ok: false, message: 'ไม่พบกลุ่มเรียนในปีการศึกษานี้' };
+
+  const removed = await db
+    .delete(attendance)
+    .where(
+      and(
+        eq(attendance.sectionId, sectionId),
+        eq(attendance.date, ymd),
+        slot ? eq(attendance.slot, slot) : undefined,
+      ),
+    )
+    .returning({ id: attendance.id });
+
+  await logActivity(user, 'clear_attendance', `section:${sectionId}`, {
+    date: ymd,
+    slot: slot ?? 'both',
+    removed: removed.length,
+  });
+  revalidatePath('/attendance');
+  revalidatePath('/attendance/view');
+
+  const what = slot ? `ช่วง${slot === 'morning' ? 'เช้า' : 'บ่าย'}` : 'ทั้งวัน';
+  if (removed.length === 0)
+    return { ok: true, message: `${what}ยังไม่มีการเช็คชื่อที่บันทึกไว้` };
+  return { ok: true, message: `ล้างการเช็คชื่อ${what}แล้ว — ลบ ${removed.length} รายการ` };
 }

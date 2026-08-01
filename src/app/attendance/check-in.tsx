@@ -14,9 +14,11 @@ import {
   ChevronRight,
   ArrowLeft,
   Users,
+  Eraser,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardHeader, Button, Badge, EmptyState } from '@/components/ui';
+import { useDialog } from '@/components/dialog';
 import { ClassDayCalendar } from '@/components/class-day-calendar';
 import {
   THAI_WEEKDAYS,
@@ -29,7 +31,12 @@ import {
 import { DAY_OUTCOME_LABEL, dayOutcome, type DayResult } from '@/lib/evaluate';
 import type { ClassDay, SectionOnDay } from '@/lib/subjects-for-user';
 import type { DayRosterEntry } from '@/lib/data';
-import { loadSectionsOnDate, loadDayRoster, saveDayAttendance } from './actions';
+import {
+  loadSectionsOnDate,
+  loadDayRoster,
+  saveDayAttendance,
+  clearDayAttendance,
+} from './actions';
 
 type Slot = 'morning' | 'afternoon';
 
@@ -272,8 +279,15 @@ function RosterEditor({
     morning: false,
     afternoon: false,
   });
+  /** which slots are already written to the database — those need a delete, not a reset */
+  const [saved, setSaved] = useState<Record<Slot, boolean>>({
+    morning: false,
+    afternoon: false,
+  });
   const [loading, startLoad] = useTransition();
   const [saving, setSaving] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const dialog = useDialog();
 
   function refresh() {
     startLoad(async () => {
@@ -292,10 +306,12 @@ function RosterEditor({
           r.roster.filter((e) => e.afternoon !== null).map((e) => [e.studentId, e.afternoon!]),
         ),
       });
-      setTouched({
+      const onFile = {
         morning: r.roster.some((e) => e.morning !== null),
         afternoon: r.roster.some((e) => e.afternoon !== null),
-      });
+      };
+      setTouched(onFile);
+      setSaved(onFile);
     });
   }
 
@@ -316,6 +332,49 @@ function RosterEditor({
   function setWholeDay(value: boolean) {
     setAll('morning', value);
     setAll('afternoon', value);
+  }
+
+  /**
+   * Put a slot — or the whole day — back to ยังไม่เช็ค.
+   *
+   * Marks that were only pressed on screen are dropped locally; anything already
+   * saved has to be deleted on the server, and that is asked about first, since
+   * it takes the day out of the ผ่าน/ไม่ผ่าน count for every student in the room.
+   */
+  async function clear(slot: Slot | null) {
+    if (clearing) return;
+    const slots: Slot[] = slot ? [slot] : ['morning', 'afternoon'];
+    const what = slot ? `ช่วง${slot === 'morning' ? 'เช้า' : 'บ่าย'}` : 'ทั้งวัน';
+    if (!slots.some((s) => touched[s])) {
+      toast.error(`${what}ยังไม่ได้เช็ค — ไม่มีอะไรให้ล้าง`);
+      return;
+    }
+
+    const onServer = slots.filter((s) => saved[s]);
+    if (onServer.length > 0) {
+      const ok = await dialog.confirm({
+        title: `ล้างการเช็คชื่อ${what}?`,
+        description: `ลบผลเช็คชื่อ${what}ของ ${section.subjectCode} ${section.name} วันที่ ${thaiDateLong(date)} ที่บันทึกไว้แล้ว ${roster?.length ?? 0} คน — วันนี้จะกลับไปเป็น “ยังไม่เช็ค” และไม่ถูกนับในผลเช็คชื่อ`,
+        tone: 'destructive',
+        confirmLabel: 'ล้างการเช็คชื่อ',
+      });
+      if (!ok) return;
+      setClearing(true);
+      const r = await clearDayAttendance({ sectionId: section.id, date, slot: slot ?? undefined });
+      setClearing(false);
+      if (!r.ok) {
+        toast.error(r.message);
+        return;
+      }
+      toast.success(r.message);
+    } else {
+      toast.success(`ล้าง${what}แล้ว — ยังไม่ได้บันทึกอะไรลงระบบ`);
+    }
+
+    // Only the cleared slots are reset, so unsaved edits in the other one stay.
+    setMarks((m) => ({ ...m, ...Object.fromEntries(slots.map((s) => [s, new Map()])) }));
+    setTouched((t) => ({ ...t, ...Object.fromEntries(slots.map((s) => [s, false])) }));
+    setSaved((s) => ({ ...s, ...Object.fromEntries(slots.map((x) => [x, false])) }));
   }
 
   async function submit() {
@@ -416,6 +475,16 @@ function RosterEditor({
                 <XCircle className="size-4 shrink-0" strokeWidth={1.9} />
                 <span className="hidden sm:inline">ทุกคน</span>ไม่มาทั้งวัน
               </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={clearing || (!touched.morning && !touched.afternoon)}
+                className="whitespace-nowrap px-2 text-destructive hover:bg-destructive/10 sm:px-3"
+                onClick={() => clear(null)}
+              >
+                <Eraser className="size-4 shrink-0" strokeWidth={1.9} />
+                ล้างทั้งวัน
+              </Button>
               <span className="hidden self-center text-xs text-muted-foreground sm:ml-auto sm:block">
                 กดมาทั้งหมดก่อน แล้วค่อยกดแก้เฉพาะคนที่ไม่มา
               </span>
@@ -424,16 +493,22 @@ function RosterEditor({
               <SlotControls
                 slot="morning"
                 touched={touched.morning}
+                saved={saved.morning}
                 present={present('morning')}
                 total={roster.length}
+                busy={clearing}
                 onAll={setAll}
+                onClear={clear}
               />
               <SlotControls
                 slot="afternoon"
                 touched={touched.afternoon}
+                saved={saved.afternoon}
                 present={present('afternoon')}
                 total={roster.length}
+                busy={clearing}
                 onAll={setAll}
+                onClear={clear}
               />
             </div>
           </Card>
@@ -483,7 +558,7 @@ function RosterEditor({
                 size="lg"
                 className="w-full sm:w-auto"
                 onClick={submit}
-                disabled={saving}
+                disabled={saving || clearing}
               >
                 {saving ? (
                   <Loader2 className="size-4.5 animate-spin" />
@@ -496,7 +571,7 @@ function RosterEditor({
           </Card>
 
           <p className="px-1 pb-1 text-center text-xs text-muted-foreground">
-            มาแค่เช้าหรือบ่าย = ผ่าน · มาครบทั้งวัน = ยอดเยี่ยม · ไม่มาเลย = ไม่ผ่าน
+            มาแค่เช้าหรือบ่าย = ผ่าน · มาครบทั้งวัน = ยอดเยี่ยม · ไม่มาเลย = ไม่ผ่าน · กดผิดกดล้างได้
             <span className="hidden sm:inline">
               {' '}
               · คอลัมน์ “ที่” เรียงลำดับเดียวกับใบเช็คชื่อที่พิมพ์ · “เลขที่” คือเลขที่ห้องจริงของนักเรียน
@@ -525,7 +600,16 @@ function RosterRow({
   onSet: (slot: Slot, value: boolean) => void;
 }) {
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:flex-nowrap sm:gap-x-4 sm:px-5 sm:py-2 sm:hover:bg-secondary/40">
+    <li
+      className={cn(
+        'flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:flex-nowrap sm:gap-x-4 sm:px-5 sm:py-2',
+        // Absences carry a tint across the whole row: those are the few names a
+        // teacher re-reads before saving, and they have to stand out of forty.
+        morning === false || afternoon === false
+          ? 'bg-destructive/5 sm:hover:bg-destructive/10'
+          : 'sm:hover:bg-secondary/40',
+      )}
+    >
       {/* ลำดับเดียวกับใบเช็คชื่อที่พิมพ์ — a phone has no room for it */}
       <span
         className="hidden w-6 shrink-0 text-center text-xs text-muted-foreground tabular-nums sm:block"
@@ -564,19 +648,31 @@ function RosterRow({
 function SlotControls({
   slot,
   touched,
+  saved,
   present,
   total,
+  busy,
   onAll,
+  onClear,
 }: {
   slot: Slot;
   touched: boolean;
+  /** already in the database — the ล้าง here deletes rather than just resets */
+  saved: boolean;
   present: number;
   total: number;
+  busy: boolean;
   onAll: (slot: Slot, value: boolean) => void;
+  onClear: (slot: Slot) => void;
 }) {
   const isMorning = slot === 'morning';
   return (
-    <div className="rounded-xl border border-border p-3">
+    <div
+      className={cn(
+        'rounded-xl border p-3 transition-colors',
+        touched ? 'border-success/40 bg-success/5' : 'border-border',
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-sm font-medium">
           {isMorning ? (
@@ -586,13 +682,25 @@ function SlotControls({
           )}
           ช่วง{isMorning ? 'เช้า' : 'บ่าย'}
         </span>
-        {touched ? (
-          <Badge tone="success">
-            มา {present}/{total}
-          </Badge>
-        ) : (
-          <Badge tone="secondary">ยังไม่เช็ค</Badge>
-        )}
+        <span className="flex items-center gap-1.5">
+          {touched ? (
+            <Badge tone="success">
+              มา {present}/{total}
+            </Badge>
+          ) : (
+            <Badge tone="secondary">ยังไม่เช็ค</Badge>
+          )}
+          <button
+            type="button"
+            disabled={busy || !touched}
+            onClick={() => onClear(slot)}
+            title={saved ? 'ลบผลเช็คชื่อช่วงนี้ที่บันทึกไว้' : 'ล้างที่กดไว้ในช่วงนี้'}
+            aria-label={`ล้างการเช็คชื่อช่วง${isMorning ? 'เช้า' : 'บ่าย'}`}
+            className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
+          >
+            <Eraser className="size-4" strokeWidth={1.9} />
+          </button>
+        </span>
       </div>
       <div className="mt-2.5 flex gap-2">
         <Button size="sm" variant="secondary" className="flex-1" onClick={() => onAll(slot, true)}>
@@ -654,8 +762,25 @@ function SlotToggle({
   const Icon = slot === 'morning' ? Sun : Moon;
   const label = `ช่วง${slot === 'morning' ? 'เช้า' : 'บ่าย'} · ${student}`;
   return (
-    <span className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-secondary/40 py-1.5 sm:flex-none sm:bg-transparent sm:py-0">
-      <Icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+    <span
+      className={cn(
+        // The pill behind the pair is tinted too, so a row that has been checked
+        // is separable from one that has not without reading the icons.
+        'flex flex-1 items-center justify-center gap-1.5 rounded-xl py-1.5 transition-colors sm:flex-none sm:px-1.5 sm:py-1',
+        value === true
+          ? 'bg-success/10'
+          : value === false
+            ? 'bg-destructive/10'
+            : 'bg-secondary/40 sm:bg-transparent',
+      )}
+    >
+      <Icon
+        className={cn(
+          'size-4 shrink-0',
+          value === true ? 'text-success' : value === false ? 'text-destructive' : 'text-muted-foreground',
+        )}
+        strokeWidth={1.8}
+      />
       <PresenceButton
         active={value === true}
         tone="present"
@@ -713,15 +838,19 @@ function PresenceButton({
       aria-label={label ? `${verb} — ${label}` : verb}
       aria-pressed={active}
       className={cn(
-        'grid size-10 shrink-0 touch-manipulation place-items-center rounded-lg border transition-colors active:scale-95 sm:size-9',
+        // The pressed one is filled solid, not tinted: a teacher checks forty
+        // rows at arm's length and has to see which way each one went at a
+        // glance — a 10% wash of the same colour reads as "nothing pressed yet".
+        'grid size-10 shrink-0 touch-manipulation place-items-center rounded-lg border transition-all active:scale-95 sm:size-9',
         active
           ? tone === 'present'
-            ? 'border-success bg-success/10 text-success'
-            : 'border-destructive bg-destructive/10 text-destructive'
-          : 'border-border text-muted-foreground hover:bg-secondary/60',
+            ? 'border-success bg-success text-success-foreground shadow-sm ring-2 ring-success/25'
+            : 'border-destructive bg-destructive text-destructive-foreground shadow-sm ring-2 ring-destructive/25'
+          : // Faded once the row has an answer, so the filled one carries the row
+            'border-border bg-card text-muted-foreground opacity-70 hover:bg-secondary/60 hover:opacity-100',
       )}
     >
-      <Icon className="size-5" strokeWidth={1.9} />
+      <Icon className="size-5" strokeWidth={2} />
     </button>
   );
 }
