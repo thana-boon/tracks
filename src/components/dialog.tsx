@@ -237,7 +237,9 @@ export function Modal({
         aria-labelledby={labelledBy}
         onKeyDown={onKeyDown}
         className={cn(
-          'anim-scale-in relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-2xl',
+          // Capped to the screen and scrolled inside: a long form on a phone
+          // used to run off the bottom of a centred panel with nothing to grab.
+          'anim-scale-in relative flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl',
           className,
         )}
       >
@@ -251,9 +253,11 @@ export function Modal({
             <X className="size-4" strokeWidth={1.9} />
           </button>
         ) : null}
-        <div className="p-5 pr-12 sm:p-6 sm:pr-12">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 pr-12 sm:p-6 sm:pr-12">
+          {children}
+        </div>
         {footer ? (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border/60 bg-secondary/20 px-5 py-3.5 sm:px-6">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border/60 bg-secondary/20 px-5 py-3.5 sm:px-6">
             {footer}
           </div>
         ) : null}

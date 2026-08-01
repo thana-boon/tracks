@@ -28,17 +28,25 @@ export function CardHeader({
   action?: React.ReactNode;
   className?: string;
 }) {
+  // Wraps rather than overflows: a Thai title plus a badge like
+  // "ทั้งปี ยังเช็คไม่ครบ 12 กลุ่ม" is wider than a phone, and a header that
+  // refuses to break pushes the whole page sideways — every card on every
+  // screen shares this row, so it has to give way on its own.
   return (
-    <div className={cn('flex items-center justify-between gap-3 p-4 sm:p-5', className)}>
-      <div className="flex items-center gap-3">
+    <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 p-4 sm:p-5', className)}>
+      <div className="flex min-w-0 items-center gap-3">
         {icon ? (
-          <span className="grid size-8 place-items-center rounded-lg bg-primary/10 text-primary">
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             {icon}
           </span>
         ) : null}
-        <h2 className="text-sm font-semibold sm:text-base">{title}</h2>
+        <h2 className="min-w-0 text-sm font-semibold sm:text-base">{title}</h2>
       </div>
-      {action}
+      {action ? (
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+          {action}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -88,7 +96,7 @@ export function Input({
   return (
     <input
       className={cn(
-        'h-11 w-full rounded-lg border border-input bg-card px-3.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary',
+        'h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary',
         className,
       )}
       {...props}
@@ -101,9 +109,12 @@ export function Select({
   ...props
 }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
+    // min-w-0: a <select> is intrinsically as wide as its longest <option>, so
+    // a รอบเรียน label like "ก1 · TR101 — ... (รอบ ก)" would otherwise refuse to
+    // shrink inside a flex row and push the page past the edge of a phone.
     <select
       className={cn(
-        'h-11 w-full rounded-lg border border-input bg-card px-3 text-sm outline-none focus:border-primary',
+        'h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3 text-sm outline-none focus:border-primary',
         className,
       )}
       {...props}
@@ -118,7 +129,7 @@ export function Textarea({
   return (
     <textarea
       className={cn(
-        'w-full rounded-lg border border-input bg-card px-3.5 py-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary',
+        'w-full min-w-0 rounded-lg border border-input bg-card px-3.5 py-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary',
         className,
       )}
       {...props}

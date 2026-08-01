@@ -321,7 +321,7 @@ function SectionOverview({
           <EmptyState title="ไม่พบกลุ่มเรียนตามเงื่อนไข" hint="ลองล้างตัวกรองหมวดหรือวันเรียน" />
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overscroll-x-contain">
           <table className="w-full min-w-[860px] text-sm">
             <thead>
               <tr className="border-y border-border text-xs text-muted-foreground">

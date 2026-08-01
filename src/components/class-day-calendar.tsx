@@ -57,11 +57,20 @@ export function ClassDayCalendar({
     [days],
   );
 
-  /** Open on the chosen day, else on the month of the most recent class day. */
+  /**
+   * Open on the chosen day, else on this month.
+   *
+   * เดือนปัจจุบันมาก่อนเสมอ — the day a teacher wants is nearly always in the
+   * month they are standing in, even early in the month before its first class
+   * day has come round. Only when this month has no classes at all do we fall
+   * back to the nearest month that does, so the arrows still have somewhere to
+   * go.
+   */
   const [month, setMonth] = useState(() => {
     if (value) return value.slice(0, 7);
-    const latestPast = [...days].reverse().find((d) => d.date <= today);
-    return (latestPast?.date ?? days[0]?.date ?? today).slice(0, 7);
+    const current = today.slice(0, 7);
+    if (months.includes(current)) return current;
+    return [...months].reverse().find((m) => m < current) ?? months[0] ?? current;
   });
 
   const at = months.indexOf(month);

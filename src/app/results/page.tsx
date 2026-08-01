@@ -123,7 +123,17 @@ export default async function AttendanceTimePage({
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/*
+            Eight columns will not go on a phone. Below sm the same numbers are
+            a list — เข้าเรียน% first, since that is what the row is read for.
+          */}
+          <ul className="divide-y divide-border/60 border-t border-border/60 sm:hidden">
+            {rows.map((r) => (
+              <StudentCard key={r.student.id} row={r} />
+            ))}
+          </ul>
+          <div className="hidden overflow-x-auto overscroll-x-contain sm:block">
             <table className="w-full min-w-[720px] text-sm">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
@@ -144,6 +154,7 @@ export default async function AttendanceTimePage({
               </tbody>
             </table>
           </div>
+          </>
         )}
       </Card>
 
@@ -169,25 +180,7 @@ function StudentRow({ row }: { row: AttendanceRow }) {
       </td>
       <td className="px-4 py-2">
         <p className="truncate font-medium">{s.fullName}</p>
-        {row.lines.length === 0 ? (
-          <p className="text-xs text-muted-foreground">ยังไม่ได้ลงวิชาเสริม</p>
-        ) : (
-          <div className="mt-0.5 flex flex-wrap gap-1">
-            {row.lines.map((l) => (
-              <span
-                key={`${l.subjectCode}·${l.sectionName}`}
-                title={`${l.subjectName} · ${l.sectionName}`}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 text-[11px] text-muted-foreground"
-              >
-                <BookOpen className="size-3" strokeWidth={2} />
-                <span className="font-medium text-foreground">{l.subjectCode}</span>
-                <span className="tabular-nums">
-                  {l.held === 0 ? 'ยังไม่เช็ค' : `${l.full + l.partial}/${l.held}`}
-                </span>
-              </span>
-            ))}
-          </div>
-        )}
+        <SubjectChips lines={row.lines} className="mt-0.5" />
       </td>
       <td className="px-3 py-2 text-center tabular-nums text-success">{row.full}</td>
       <td className="px-3 py-2 text-center tabular-nums text-[#8a6a00]">{row.partial}</td>
@@ -206,6 +199,69 @@ function StudentRow({ row }: { row: AttendanceRow }) {
         )}
       </td>
     </tr>
+  );
+}
+
+/** วิชาเสริมที่ลง กับสัดส่วนการมาของแต่ละวิชา — shared by the row and the card. */
+function SubjectChips({
+  lines,
+  className,
+}: {
+  lines: AttendanceRow['lines'];
+  className?: string;
+}) {
+  if (lines.length === 0)
+    return <p className={`text-xs text-muted-foreground ${className ?? ''}`}>ยังไม่ได้ลงวิชาเสริม</p>;
+  return (
+    <div className={`flex flex-wrap gap-1 ${className ?? ''}`}>
+      {lines.map((l) => (
+        <span
+          key={`${l.subjectCode}·${l.sectionName}`}
+          title={`${l.subjectName} · ${l.sectionName}`}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 text-[11px] text-muted-foreground"
+        >
+          <BookOpen className="size-3" strokeWidth={2} />
+          <span className="font-medium text-foreground">{l.subjectCode}</span>
+          <span className="tabular-nums">
+            {l.held === 0 ? 'ยังไม่เช็ค' : `${l.full + l.partial}/${l.held}`}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** The same student on a phone — เข้าเรียน% up top, the counts on one line. */
+function StudentCard({ row }: { row: AttendanceRow }) {
+  const s = row.student;
+  const low = row.held > 0 && row.attendedRatio < PASS_MIN_RATIO;
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+      <span
+        className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary text-sm font-semibold text-secondary-foreground tabular-nums"
+        title="เลขที่ในห้องเรียน"
+      >
+        {s.classNumber ?? <span className="text-muted-foreground">—</span>}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.fullName}</span>
+      <span className="shrink-0">
+        {row.held === 0 ? (
+          <span className="text-xs text-muted-foreground">ยังไม่มีวันเรียน</span>
+        ) : (
+          <Badge tone={low ? 'destructive' : 'success'}>
+            {Math.round(row.attendedRatio * 100)}%
+          </Badge>
+        )}
+      </span>
+      <span className="flex basis-full flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums text-muted-foreground">
+        <span className="text-success">เต็มวัน {row.full}</span>
+        <span className="text-[#8a6a00]">ครึ่งวัน {row.partial}</span>
+        <span className="text-destructive">ขาด {row.absent}</span>
+        {row.pending > 0 ? <span>รอเช็ค {row.pending}</span> : null}
+        <span>จาก {row.held} วันเรียน</span>
+      </span>
+      <SubjectChips lines={row.lines} className="basis-full" />
+    </li>
   );
 }
 

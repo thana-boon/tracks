@@ -421,8 +421,19 @@ export async function DayDetail({
               </div>
             }
           />
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
+          {/*
+            Six columns need 520px, which a phone has not got — so below sm the
+            same rows are a list instead, the way the เช็คชื่อ screen already
+            does it. Reading one day's roster should never mean dragging the
+            page sideways.
+          */}
+          <ul className="divide-y divide-border/60 border-t border-border/60 sm:hidden">
+            {roster.map((e) => (
+              <RosterCard key={e.studentId} entry={e} />
+            ))}
+          </ul>
+          <div className="hidden overflow-x-auto overscroll-x-contain sm:block">
+            <table className="w-full min-w-[520px] text-sm">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="w-10 py-2 pl-4 pr-1 text-center font-medium">ที่</th>
@@ -446,6 +457,48 @@ export async function DayDetail({
         </Card>
       )}
     </div>
+  );
+}
+
+/** The same student on a phone: name on top, both slots on a second line. */
+function RosterCard({ entry: e }: { entry: DayRosterEntry }) {
+  const pending = e.morning === null && e.afternoon === null;
+  const result: DayResult = dayOutcome(e.morning, e.afternoon);
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+      <span
+        className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary text-sm font-semibold text-secondary-foreground tabular-nums"
+        title="เลขที่ในห้องเรียน"
+      >
+        {e.classNumber ?? <span className="text-muted-foreground">—</span>}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">
+          {e.fullName}
+          {e.nickname ? <span className="font-normal text-muted-foreground"> ({e.nickname})</span> : null}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground tabular-nums">
+          {e.code} · {e.gradeLevel}/{e.classroom}
+        </span>
+      </span>
+      <span className="shrink-0">
+        {pending ? (
+          <span className="text-xs text-muted-foreground">ยังไม่เช็ค</span>
+        ) : (
+          <Badge tone={result === 'excellent' ? 'accent' : result === 'partial' ? 'success' : 'destructive'}>
+            {DAY_OUTCOME_LABEL[result]}
+          </Badge>
+        )}
+      </span>
+      <span className="flex basis-full items-center gap-3 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          เช้า <PresenceCell value={e.morning} />
+        </span>
+        <span className="flex items-center gap-1.5">
+          บ่าย <PresenceCell value={e.afternoon} />
+        </span>
+      </span>
+    </li>
   );
 }
 
@@ -518,7 +571,7 @@ export async function TermSummary({ year, sectionId }: { year: YearRow; sectionI
             กลับไปดูรายวัน
           </Button>
         </Link>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
           <SectionSwitcher sections={sections} current={section.id} />
           <Link href={`/attendance/print?section=${section.id}`}>
             <Button variant="secondary" size="md">
@@ -544,7 +597,7 @@ export async function TermSummary({ year, sectionId }: { year: YearRow; sectionI
               </Badge>
             }
           />
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overscroll-x-contain">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">

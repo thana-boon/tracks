@@ -65,7 +65,32 @@ export default async function SubjectResultsPage({
             title={`${section.subjectCode} — ${section.subjectName} · ${section.name}`}
             action={<Badge tone="navy">{rows.length} คน</Badge>}
           />
-          <div className="overflow-x-auto">
+          {/* Seven columns need 560px; below sm the same row reads as a card. */}
+          <ul className="divide-y divide-border/60 border-t border-border/60 sm:hidden">
+            {rows.map(({ student, evaluation }) => (
+              <li key={student.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{student.fullName}</span>
+                  <span className="block truncate text-xs text-muted-foreground tabular-nums">
+                    {student.code} · {student.gradeLevel}/{student.classroom}
+                  </span>
+                </span>
+                <Badge tone={resultTone(evaluation.overall)}>{OVERALL_LABEL[evaluation.overall]}</Badge>
+                <span className="flex basis-full flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums text-muted-foreground">
+                  <span className="text-success">มาตรง {evaluation.counts.excellent}</span>
+                  <span className="text-[#8a6a00]">ครึ่งวัน {evaluation.counts.partial}</span>
+                  <span className="text-destructive">ขาด {evaluation.counts.absent}</span>
+                  <span>
+                    เข้าเรียน{' '}
+                    {evaluation.totalDays === 0
+                      ? '—'
+                      : `${Math.round(evaluation.attendedRatio * 100)}%`}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="hidden overflow-x-auto overscroll-x-contain sm:block">
             <table className="w-full min-w-[560px] text-sm">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">

@@ -89,8 +89,9 @@ export default async function HomeroomPage({
                   <EmptyState title="ไม่มีนักเรียนในห้องนี้" />
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[560px] text-sm">
+                <div className="overflow-x-auto overscroll-x-contain">
+                  {/* Two columns fit a phone once the floor comes off. */}
+                  <table className="w-full text-sm sm:min-w-[560px]">
                     <thead>
                       <tr className="border-b border-border text-xs text-muted-foreground">
                         <th className="px-4 py-2.5 text-left font-medium">นักเรียน</th>
