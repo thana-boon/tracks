@@ -217,12 +217,26 @@ export const schoolos = {
       body: JSON.stringify({ role, username, password }),
     }),
 
-  /** Pull every page of studying students in the given grade. */
-  async studentsOfGrade(grade: string): Promise<SchoolOsStudent[]> {
+  /**
+   * Pull every page of students in the given grade.
+   *
+   * `status: 'all'` on purpose (Users API §9): the roster endpoint defaults to
+   * `studying`, so a student who graduates or withdraws would simply stop being
+   * returned and this app would never learn they left — their mirror row would
+   * sit at `studying` forever and they would keep appearing in every picker.
+   * Asking for every status lets the sync record the change instead of guessing
+   * it from an absence.
+   *
+   * Note the endpoint inner-joins the enrolment of the year being asked about
+   * (§5.3): once the calendar rolls over, someone who has no enrolment in the
+   * new year drops out even with `all`. That is why the mirror keeps its own
+   * copy — see syncStudents().
+   */
+  async studentsOfGrade(grade: string, status = 'all'): Promise<SchoolOsStudent[]> {
     const out: SchoolOsStudent[] = [];
     let page = 1;
     for (;;) {
-      const res = await this.students({ grade, status: 'studying', page, pageSize: 200 });
+      const res = await this.students({ grade, status, page, pageSize: 200 });
       out.push(...res.data);
       if (page * res.pageSize >= res.total || res.data.length === 0) break;
       page += 1;

@@ -59,7 +59,21 @@ export async function syncYears(): Promise<SyncCounts> {
   return { created, updated, total: years.length };
 }
 
-/** Mirror studying students of ม.4-6 only (the grades this system serves). */
+/**
+ * Mirror students of ม.4-6 — every status, not just the ones still studying.
+ *
+ * A leaver is never deleted here, and never inferred from an absence: the
+ * Users Service reports `graduated` / `withdrawn` itself, so the mirror simply
+ * records what it is told. Rows the roster no longer returns at all are left
+ * untouched — after the calendar rolls over a graduate has no enrolment in the
+ * new year and vanishes from the endpoint entirely (Users API §5.3), and the
+ * copy already captured here is the only remaining record of them.
+ *
+ * That is also why grade/room are never overwritten with null: the endpoint
+ * reports them for the *active* year, so a student with no enrolment left
+ * comes back with nulls, and blanking the mirror would lose which ม. they
+ * finished — the one fact หน้านักเรียนจบการศึกษา is built on.
+ */
 export async function syncStudents(): Promise<SyncCounts> {
   let created = 0;
   let updated = 0;
@@ -84,12 +98,25 @@ export async function syncStudents(): Promise<SyncCounts> {
         syncedAt: new Date(),
       };
       const [existing] = await db
-        .select({ id: people.id })
+        .select({
+          id: people.id,
+          gradeLevel: people.gradeLevel,
+          classroom: people.classroom,
+          classNumber: people.classNumber,
+        })
         .from(people)
         .where(and(eq(people.type, 'student'), eq(people.schoolosId, s.id)))
         .limit(1);
       if (existing) {
-        await db.update(people).set(values).where(eq(people.id, existing.id));
+        await db
+          .update(people)
+          .set({
+            ...values,
+            gradeLevel: s.gradeLevel ?? existing.gradeLevel,
+            classroom: s.classroom ?? existing.classroom,
+            classNumber: s.classNumber ?? existing.classNumber,
+          })
+          .where(eq(people.id, existing.id));
         updated += 1;
       } else {
         await db.insert(people).values({ type: 'student', schoolosId: s.id, ...values });

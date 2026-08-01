@@ -19,6 +19,8 @@ import {
   Settings2,
   Stamp,
   Wrench,
+  Archive,
+  UserRoundX,
 } from 'lucide-react';
 import type { AppRole } from '@/lib/session';
 
@@ -91,6 +93,14 @@ export function navFor(role: AppRole): NavEntry[] {
           { href: '/results/subject', label: 'ผลรายวิชา', icon: <GraduationCap className="size-5" strokeWidth={sw} /> },
           { href: '/homeroom', label: 'ห้องที่ปรึกษา', icon: <Users className="size-5" strokeWidth={sw} /> },
           { href: '/admin/transcript', label: 'ทรานสคริปต์', icon: <FileText className="size-5" strokeWidth={sw} /> },
+        ],
+      },
+      {
+        label: 'ระเบียนย้อนหลัง',
+        icon: <Archive className="size-5" strokeWidth={sw} />,
+        items: [
+          { href: '/admin/graduated', label: 'จบการศึกษา', icon: <GraduationCap className="size-5" strokeWidth={sw} /> },
+          { href: '/admin/withdrawn', label: 'ลาออก', icon: <UserRoundX className="size-5" strokeWidth={sw} /> },
         ],
       },
       {
