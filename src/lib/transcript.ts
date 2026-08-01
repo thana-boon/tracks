@@ -9,8 +9,8 @@ import {
   trackGroups,
   trackSubjects,
 } from '@/db/schema';
-import { attendanceRecords, classDatesOf } from './data';
-import { evaluateSubject, type OverallResult } from './evaluate';
+import { prepareSections } from './data';
+import { evaluatePrepared, type OverallResult } from './evaluate';
 import type { YearRow } from './years';
 
 /**
@@ -26,26 +26,10 @@ import type { YearRow } from './years';
  *                       failed or never assessed is left off rather than printed
  *                       as a permanent bad mark.
  *
- * Both evaluate each section once and index the result by student, so N
- * students × M sections costs M attendance queries rather than N×M.
+ * Both fold each section once (prepareSections: two queries for the whole set)
+ * and read every student off that fold, so N students × M sections costs two
+ * queries and one pass over the records rather than N×M of either.
  */
-
-interface SectionEvaluation {
-  records: Awaited<ReturnType<typeof attendanceRecords>>;
-  dates: string[];
-}
-
-/** Attendance + schedule for each section, fetched once, in parallel. */
-async function loadSections(sectionIds: number[]): Promise<Map<number, SectionEvaluation>> {
-  const cache = new Map<number, SectionEvaluation>();
-  await Promise.all(
-    [...new Set(sectionIds)].map(async (sid) => {
-      const [records, dates] = await Promise.all([attendanceRecords(sid), classDatesOf(sid)]);
-      cache.set(sid, { records, dates });
-    }),
-  );
-  return cache;
-}
 
 export interface StudentInfo {
   id: number;
@@ -129,11 +113,10 @@ export async function buildYearResults(
     )
     .orderBy(asc(trackGroups.code), asc(trackSubjects.code), asc(subjectSections.name));
 
-  const cache = await loadSections(regs.map((r) => r.sectionId));
+  const cache = await prepareSections(regs.map((r) => r.sectionId));
   const byStudent = new Map<number, YearResultLine[]>();
   for (const r of regs) {
-    const c = cache.get(r.sectionId)!;
-    const e = evaluateSubject(r.studentId, c.records, c.dates);
+    const e = evaluatePrepared(r.studentId, cache.get(r.sectionId)!);
     const arr = byStudent.get(r.studentId) ?? [];
     arr.push({
       groupCode: r.groupCode,
@@ -210,7 +193,7 @@ export async function buildTranscripts(studentIds: number[]): Promise<StudentTra
     .where(and(isNull(registrations.droppedAt), inArray(registrations.studentId, studentIds)))
     .orderBy(asc(academicYears.year), asc(trackGroups.code), asc(trackSubjects.code));
 
-  const cache = await loadSections(regs.map((r) => r.sectionId));
+  const cache = await prepareSections(regs.map((r) => r.sectionId));
 
   // studentId → groupCode → block. Insertion order follows the year-then-code
   // order above, so a group first appears where the student first took
@@ -219,8 +202,7 @@ export async function buildTranscripts(studentIds: number[]): Promise<StudentTra
   const yearsByStudent = new Map<number, Set<string>>();
 
   for (const r of regs) {
-    const c = cache.get(r.sectionId)!;
-    const e = evaluateSubject(r.studentId, c.records, c.dates);
+    const e = evaluatePrepared(r.studentId, cache.get(r.sectionId)!);
     if (!PASSING.has(e.overall)) continue;
 
     let groups = byStudent.get(r.studentId);

@@ -23,6 +23,10 @@ export async function GET(
       headers: {
         'Content-Type': 'application/octet-stream',
         'Content-Disposition': `attachment; filename="${name}"`,
+        // The archive is the whole database — every student, and the admin
+        // password hashes. Nothing should keep a copy of it but the person who
+        // asked for it.
+        'Cache-Control': 'private, no-store, must-revalidate',
       },
     });
   } catch {

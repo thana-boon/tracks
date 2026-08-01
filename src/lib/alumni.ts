@@ -38,8 +38,25 @@ export interface AlumniRow {
   years: string[];
 }
 
+/**
+ * Alumni are the one list that only ever grows: every ม.6 cohort is added to it
+ * and none is ever removed, and each row's passedCount is read out of that
+ * student's whole attendance history. It also changes only when the roster sync
+ * runs. Holding the built list briefly means opening the page twice — or two
+ * people opening it at once — costs one build, not two.
+ */
+const CACHE_MS = 5 * 60 * 1000;
+const cache = new Map<AlumniStatus, { at: number; rows: AlumniRow[] }>();
+
+/** Drop the memo — for whatever changes who counts as an alumnus (the sync). */
+export function forgetAlumni(): void {
+  cache.clear();
+}
+
 /** รายชื่อ + สรุปผลสะสม เรียงตาม ชั้น → ห้อง → เลขที่ → รหัส */
 export async function alumniOf(status: AlumniStatus): Promise<AlumniRow[]> {
+  const hit = cache.get(status);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.rows;
   const rows = await db
     .select({
       id: people.id,
@@ -59,16 +76,21 @@ export async function alumniOf(status: AlumniStatus): Promise<AlumniRow[]> {
       asc(people.code),
     );
 
-  if (rows.length === 0) return [];
+  if (rows.length === 0) {
+    cache.set(status, { at: Date.now(), rows: [] });
+    return [];
+  }
 
   // buildTranscripts evaluates each section once and indexes by student, so one
   // call for the whole list costs far less than one call per row.
   const transcripts = await buildTranscripts(rows.map((r) => r.id));
   const byId = new Map(transcripts.map((t) => [t.student.id, t]));
 
-  return rows.map((r) => ({
+  const out = rows.map((r) => ({
     ...r,
     passedCount: byId.get(r.id)?.passedCount ?? 0,
     years: byId.get(r.id)?.years ?? [],
   }));
+  cache.set(status, { at: Date.now(), rows: out });
+  return out;
 }

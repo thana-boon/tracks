@@ -5,6 +5,8 @@ import { activeYear } from '@/lib/years';
 import { buildHomeroomReport, listHomerooms, studentsByRoom, toRoomMatrix } from '@/lib/homeroom';
 import { HomeroomReportDocument } from '@/lib/pdf-homeroom';
 import { thaiMonthLabel } from '@/lib/utils';
+import { withRenderSlot } from '@/lib/render-queue';
+import { busyResponse, isBusy, pdfResponse } from '@/lib/pdf-response';
 
 export const runtime = 'nodejs';
 
@@ -61,22 +63,27 @@ export async function GET(req: NextRequest) {
     ),
   );
 
-  const buffer = await renderToBuffer(
-    <HomeroomReportDocument
-      rooms={matrices}
-      yearLabel={`ปีการศึกษา ${year.year}`}
-      scopeLabel={month ? thaiMonthLabel(month) : 'ทุกเดือน'}
-    />,
-  );
+  let buffer: Buffer;
+  try {
+    // One render at a time across the whole server — see render-queue.ts.
+    buffer = await withRenderSlot(() =>
+      renderToBuffer(
+        <HomeroomReportDocument
+          rooms={matrices}
+          yearLabel={`ปีการศึกษา ${year.year}`}
+          scopeLabel={month ? thaiMonthLabel(month) : 'ทุกเดือน'}
+        />,
+      ),
+    );
+  } catch (e) {
+    if (isBusy(e)) return busyResponse();
+    throw e;
+  }
 
-  // Content-Disposition is Latin-1 only; the Thai room names live in filename*.
   const label = rooms.length === 1 ? rooms[0].key : `${rooms.length} ห้อง`;
   const when = month ? `-${thaiMonthLabel(month)}` : '';
-  const utf8 = encodeURIComponent(`รายงานห้องที่ปรึกษา-${label}${when}.pdf`);
-  return new NextResponse(new Uint8Array(buffer), {
-    headers: {
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="homeroom-report.pdf"; filename*=UTF-8''${utf8}`,
-    },
+  return pdfResponse(buffer, {
+    asciiName: 'homeroom-report.pdf',
+    thaiName: `รายงานห้องที่ปรึกษา-${label}${when}`,
   });
 }

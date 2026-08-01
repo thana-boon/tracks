@@ -3,6 +3,7 @@ import { desc } from 'drizzle-orm';
 import { db } from '@/db';
 import { syncState } from '@/db/schema';
 import { syncYears, syncStudents, syncTeachers, syncHomerooms, type SyncCounts } from './sync';
+import { forgetAlumni } from './alumni';
 import { activeYear } from './years';
 
 /**
@@ -106,6 +107,9 @@ export async function runSyncStep(kind: SyncKind, trigger: SyncTrigger): Promise
       counts = await syncYears();
     } else if (kind === 'students') {
       counts = await syncStudents();
+      // จบการศึกษา / ลาออก is decided by this step, so it is the one thing that
+      // can change who the alumni pages list.
+      forgetAlumni();
     } else if (kind === 'teachers') {
       counts = await syncTeachers();
     } else {

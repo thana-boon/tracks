@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Check, FileDown, AlertTriangle, Users, CalendarRange } from 'lucide-react';
 import { Card, CardHeader, Button, Badge, Select } from '@/components/ui';
 import { cn, thaiMonthLabel } from '@/lib/utils';
+import { withBasePath } from '@/lib/base-path';
 
 export interface ExportRoom {
   /** "ม.5/2" */
@@ -56,9 +57,10 @@ export function ExportPanel({
     setPicked((p) => (on ? [...new Set([...p, ...keys])] : p.filter((k) => !keys.includes(k))));
   }
 
-  const href =
+  const href = withBasePath(
     `/api/homeroom-report?rooms=${encodeURIComponent(ordered.map((r) => r.key).join(','))}` +
-    (month === 'all' ? '' : `&month=${month}`);
+      (month === 'all' ? '' : `&month=${month}`),
+  );
 
   return (
     <div className="space-y-4">

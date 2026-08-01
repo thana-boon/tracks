@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Printer, FileDown, Check, MapPin } from 'lucide-react';
+import { Printer, FileDown, Check, MapPin, AlertTriangle, Loader2 } from 'lucide-react';
 import { Card, CardHeader, Button, Select, Label, Badge } from '@/components/ui';
 import {
   cn,
@@ -10,6 +10,7 @@ import {
   THAI_WEEKDAYS_SHORT,
   weekdayOfYmd,
 } from '@/lib/utils';
+import { withBasePath } from '@/lib/base-path';
 
 export interface PrintSection {
   id: number;
@@ -23,6 +24,9 @@ export interface PrintSection {
   classDates: string[];
 }
 
+/** Mirrors MAX_SECTIONS in the sheet route — warn here rather than 400 there. */
+const MAX_SECTIONS = 120;
+
 export function PrintPanel({
   sections,
   current,
@@ -34,6 +38,7 @@ export function PrintPanel({
   const [group, setGroup] = useState<string>('all');
   const [date, setDate] = useState<string>('all');
   const [columns, setColumns] = useState(16);
+  const [building, setBuilding] = useState(false);
 
   const groups = useMemo(
     () => [...new Map(sections.map((s) => [s.groupCode, s.groupName])).entries()],
@@ -91,7 +96,18 @@ export function PrintPanel({
   // Ticks survive a filter change, so say so — otherwise the PDF comes out with
   // pages for รอบ that are not on screen.
   const hiddenSelected = selected.size - shown.filter((s) => selected.has(s.id)).length;
-  const href = `/api/attendance-sheet?sections=${[...selected].join(',')}&columns=${columns}`;
+  const href = withBasePath(
+    `/api/attendance-sheet?sections=${[...selected].join(',')}&columns=${columns}`,
+  );
+  const tooMany = selected.size > MAX_SECTIONS;
+
+  // The sheet opens in a new tab, which stays blank while the server lays the
+  // pages out. Saying so — and briefly locking the button — is what stops the
+  // second and third press that would only queue more of the same work.
+  function startBuild() {
+    setBuilding(true);
+    setTimeout(() => setBuilding(false), 6000);
+  }
 
   return (
     <Card className="max-w-3xl">
@@ -239,19 +255,31 @@ export function PrintPanel({
           </p>
         </div>
 
+        {tooMany ? (
+          <p className="flex items-center justify-center gap-2 text-xs text-destructive">
+            <AlertTriangle className="size-4" strokeWidth={1.8} />
+            เลือกไว้ {selected.size} รอบ — เกิน {MAX_SECTIONS} รอบต่อไฟล์ กรุณาแบ่งพิมพ์เป็นหลายครั้ง
+          </p>
+        ) : null}
         <a
-          href={selected.size ? href : undefined}
+          href={selected.size && !tooMany ? href : undefined}
           target="_blank"
           rel="noopener noreferrer"
-          className={cn('block', !selected.size && 'pointer-events-none')}
+          onClick={startBuild}
+          className={cn('block', (!selected.size || tooMany) && 'pointer-events-none')}
         >
-          <Button className="w-full" disabled={selected.size === 0}>
-            <FileDown className="size-4.5" strokeWidth={1.8} />
-            เปิดใบเช็คชื่อ (PDF) · {selected.size} หน้า
+          <Button className="w-full" disabled={selected.size === 0 || tooMany}>
+            {building ? (
+              <Loader2 className="size-4.5 animate-spin" />
+            ) : (
+              <FileDown className="size-4.5" strokeWidth={1.8} />
+            )}
+            {building ? 'กำลังสร้างเอกสาร…' : `เปิดใบเช็คชื่อ (PDF) · ${selected.size} หน้า`}
           </Button>
         </a>
         <p className="text-center text-xs text-muted-foreground">
-          A4 แนวตั้ง หน้าละ 1 กลุ่ม — เลือกหลายกลุ่มได้ ระบบจะรวมเป็นไฟล์เดียว
+          A4 แนวตั้ง หน้าละ 1 กลุ่ม — เลือกหลายกลุ่มได้ ระบบจะรวมเป็นไฟล์เดียว ·
+          เอกสารจะเปิดในแท็บใหม่ ยิ่งหลายรอบยิ่งใช้เวลาสร้างนานขึ้น
         </p>
       </div>
     </Card>

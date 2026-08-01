@@ -4,8 +4,18 @@ import { currentUser } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { listSections, studentsInSection, classDatesOf } from '@/lib/data';
 import { AttendanceSheet, type AttendanceSheetSection } from '@/lib/pdf-attendance';
+import { withRenderSlot } from '@/lib/render-queue';
+import { busyResponse, isBusy, pdfResponse } from '@/lib/pdf-response';
 
 export const runtime = 'nodejs';
+
+/**
+ * One page per รอบเรียน, so this is a page ceiling. The screen offers
+ * “เลือกที่แสดงทั้งหมด”, and a year's worth of รอบ behind that button is a
+ * document nobody wants and a render everybody else waits through — the other
+ * two exports have had a ceiling all along and this one had none.
+ */
+const MAX_SECTIONS = 120;
 
 /**
  * GET /api/attendance-sheet?sections=<id,id,…>&columns=<n>
@@ -30,6 +40,8 @@ export async function GET(req: NextRequest) {
       .filter((n) => Number.isInteger(n) && n > 0),
   );
   if (wanted.size === 0) return NextResponse.json({ error: 'bad section' }, { status: 400 });
+  if (wanted.size > MAX_SECTIONS)
+    return NextResponse.json({ error: 'scope too large' }, { status: 400 });
   const columns = Math.min(16, Math.max(1, Number(params.get('columns')) || 16));
 
   // Scoped to the active year by listSections, so an id from another year — or
@@ -63,20 +75,25 @@ export async function GET(req: NextRequest) {
     }),
   );
 
-  const buffer = await renderToBuffer(
-    <AttendanceSheet data={{ yearLabel: `ปีการศึกษา ${year.year}`, sections, columns }} />,
-  );
+  let buffer: Buffer;
+  try {
+    // One render at a time across the whole server — see render-queue.ts.
+    buffer = await withRenderSlot(() =>
+      renderToBuffer(
+        <AttendanceSheet data={{ yearLabel: `ปีการศึกษา ${year.year}`, sections, columns }} />,
+      ),
+    );
+  } catch (e) {
+    if (isBusy(e)) return busyResponse();
+    throw e;
+  }
 
-  // Content-Disposition is Latin-1 only; keep an ASCII fallback + UTF-8 name.
   const label = rows.length === 1 ? rows[0].subjectCode : `${rows.length}-รอบ`;
   const asciiLabel = (
     rows.length === 1 ? rows[0].subjectCode : `${rows.length}-sections`
   ).replace(/[^\x20-\x7E]/g, '_');
-  const utf8 = encodeURIComponent(`ใบเช็คชื่อ-${label}.pdf`);
-  return new NextResponse(new Uint8Array(buffer), {
-    headers: {
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="attendance-${asciiLabel}.pdf"; filename*=UTF-8''${utf8}`,
-    },
+  return pdfResponse(buffer, {
+    asciiName: `attendance-${asciiLabel}.pdf`,
+    thaiName: `ใบเช็คชื่อ-${label}`,
   });
 }

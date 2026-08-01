@@ -11,6 +11,12 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# The path prefix nginx mounts the app under (/tracks). It is BAKED INTO the
+# client bundle and the /_next/* asset URLs here — setting it only at runtime
+# does nothing. Change it => rebuild the image (compose passes it as a
+# build arg, see docker-compose.yml).
+ARG NEXT_PUBLIC_BASE_PATH=""
+ENV NEXT_PUBLIC_BASE_PATH=$NEXT_PUBLIC_BASE_PATH
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
@@ -33,7 +39,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 # pg_dump/pg_restore power the in-app backup/restore page (admin only).
-RUN apk add --no-cache postgresql16-client \
+# tzdata makes the container's TZ env var (Asia/Bangkok) actually take effect on
+# alpine — display dates already pin the zone via Intl, but backup FILENAMES are
+# stamped from the system clock.
+RUN apk add --no-cache postgresql16-client tzdata \
   && addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs \
   && mkdir -p /app/backups && chown nextjs:nodejs /app/backups

@@ -8,6 +8,8 @@ import { activeYear } from '@/lib/years';
 import { buildTranscripts } from '@/lib/transcript';
 import { docSettings } from '@/lib/doc-settings';
 import { TranscriptDocument } from '@/lib/pdf-transcript';
+import { withRenderSlot } from '@/lib/render-queue';
+import { busyResponse, isBusy, pdfResponse } from '@/lib/pdf-response';
 
 export const runtime = 'nodejs';
 
@@ -75,22 +77,20 @@ export async function GET(req: NextRequest) {
   if (transcripts.length === 0)
     return NextResponse.json({ error: 'no students' }, { status: 404 });
 
-  const buffer = await renderToBuffer(
-    <TranscriptDocument transcripts={transcripts} settings={settings} />,
-  );
+  let buffer: Buffer;
+  try {
+    // One render at a time across the whole server — see render-queue.ts.
+    buffer = await withRenderSlot(() =>
+      renderToBuffer(<TranscriptDocument transcripts={transcripts} settings={settings} />),
+    );
+  } catch (e) {
+    if (isBusy(e)) return busyResponse();
+    throw e;
+  }
 
   // A single sheet is nearly always a reprint for one student, so name the file
   // after them — that is what makes it findable in the Downloads folder later.
   const only = transcripts.length === 1 ? transcripts[0].student : null;
   const name = only ? `ทรานสคริปต์-${only.code}-${only.fullName}` : `ทรานสคริปต์-${label}`;
-
-  // Content-Disposition is Latin-1 only; the Thai name would throw. Give an
-  // ASCII fallback filename plus an RFC 5987 filename* carrying the Thai one.
-  const utf8 = encodeURIComponent(`${name}.pdf`);
-  return new NextResponse(new Uint8Array(buffer), {
-    headers: {
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="transcript.pdf"; filename*=UTF-8''${utf8}`,
-    },
-  });
+  return pdfResponse(buffer, { asciiName: 'transcript.pdf', thaiName: name });
 }

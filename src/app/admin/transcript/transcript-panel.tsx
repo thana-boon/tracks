@@ -1,12 +1,22 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Eye, FileText, Printer, RefreshCw, Users, X } from 'lucide-react';
+import { AlertTriangle, Eye, FileText, Loader2, Printer, RefreshCw, Users, X } from 'lucide-react';
 import { Card, CardHeader, Button, Select, Label } from '@/components/ui';
 import { StudentPicker, type PickStudent } from '@/components/student-picker';
 import { cn } from '@/lib/utils';
+import { withBasePath } from '@/lib/base-path';
 
 type Mode = 'room' | 'picked';
+
+/** Mirrors MAX_STUDENTS in the transcript route — warn here rather than 400 there. */
+const MAX_STUDENTS = 600;
+
+/** Measured ~10-20 ms per A4 page on the school server; keep the estimate honest. */
+function buildEstimate(pages: number): string {
+  const seconds = Math.ceil((pages * 20) / 1000);
+  return seconds < 2 ? 'ไม่ถึงวินาที' : `ประมาณ ${seconds} วินาที`;
+}
 
 /**
  * Choosing who to print, and looking at the result without printing it.
@@ -33,6 +43,7 @@ export function TranscriptPanel({
   const [room, setRoom] = useState('all');
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [preview, setPreview] = useState('');
+  const [building, setBuilding] = useState(false);
 
   const rooms = roomsByGrade[grade] ?? [];
 
@@ -44,16 +55,27 @@ export function TranscriptPanel({
     [students, grade, room],
   );
 
-  const href =
+  const href = withBasePath(
     mode === 'room'
       ? `/api/transcript?grade=${encodeURIComponent(grade)}${
           room !== 'all' ? `&room=${encodeURIComponent(room)}` : ''
         }`
-      : `/api/transcript?students=${[...picked].join(',')}`;
+      : `/api/transcript?students=${[...picked].join(',')}`,
+  );
 
   const count = mode === 'room' ? inRoom : picked.size;
-  const disabled = mode === 'room' ? !grade || inRoom === 0 : picked.size === 0;
+  const tooMany = count > MAX_STUDENTS;
+  const disabled = (mode === 'room' ? !grade || inRoom === 0 : picked.size === 0) || tooMany;
   const stale = preview !== '' && preview !== href;
+
+  // The document opens in a new tab that stays blank while the server lays it
+  // out — one page per student, so a whole ชั้น is real work. Say how long it
+  // should take and lock the button briefly, or the wait reads as a hang and
+  // the next press just queues the same job again.
+  function startBuild() {
+    setBuilding(true);
+    setTimeout(() => setBuilding(false), Math.min(15000, 2000 + count * 20));
+  }
 
   function toggle(id: number) {
     setPicked((prev) => {
@@ -147,6 +169,14 @@ export function TranscriptPanel({
             </div>
           )}
 
+          {tooMany ? (
+            <p className="flex items-center gap-2 text-xs text-destructive">
+              <AlertTriangle className="size-4 shrink-0" strokeWidth={1.8} />
+              เลือกไว้ {count.toLocaleString('th-TH')} คน — เกิน {MAX_STUDENTS} คนต่อไฟล์
+              กรุณาแยกพิมพ์ทีละห้อง
+            </p>
+          ) : null}
+
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" disabled={disabled} onClick={() => setPreview(href)}>
               <Eye className="size-4.5" strokeWidth={1.8} />
@@ -155,15 +185,25 @@ export function TranscriptPanel({
             {disabled ? (
               <Button disabled>
                 <Printer className="size-4.5" strokeWidth={1.8} />
-                เลือกนักเรียนก่อน
+                {tooMany ? 'เลือกน้อยลงก่อน' : 'เลือกนักเรียนก่อน'}
               </Button>
             ) : (
-              <a href={href} target="_blank" rel="noopener noreferrer">
+              <a href={href} target="_blank" rel="noopener noreferrer" onClick={startBuild}>
                 <Button>
-                  <Printer className="size-4.5" strokeWidth={1.8} /> เปิดเพื่อพิมพ์ / บันทึก
+                  {building ? (
+                    <Loader2 className="size-4.5 animate-spin" />
+                  ) : (
+                    <Printer className="size-4.5" strokeWidth={1.8} />
+                  )}
+                  {building ? 'กำลังสร้างเอกสาร…' : 'เปิดเพื่อพิมพ์ / บันทึก'}
                 </Button>
               </a>
             )}
+            {count > 0 && !tooMany ? (
+              <span className="self-center text-xs text-muted-foreground">
+                ใช้เวลาสร้าง{buildEstimate(count)}
+              </span>
+            ) : null}
           </div>
 
           <p className="text-xs text-muted-foreground">

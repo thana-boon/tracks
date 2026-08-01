@@ -115,36 +115,63 @@ export function heldDates(
 }
 
 /**
- * Evaluate one student in one subject from the subject's full attendance
- * records (all students — needed to know which slots were held).
+ * A section's attendance folded once, so evaluating N students costs one pass
+ * over the records plus O(dates) each — not one full pass per student.
+ *
+ * Reading a whole ชั้น (or every ศิษย์เก่า) evaluates the same section for
+ * dozens of students; doing the fold per student made the transcript export
+ * quadratic in roster size, which is what made a big print sit there.
  */
-export function evaluateSubject(
-  studentId: number,
+export interface PreparedSection {
+  /** the section's declared schedule, ascending — including dates nobody checked */
+  scheduledDates: string[];
+  /** held dates, ascending */
+  dates: string[];
+  /** date → slots actually held, sorted */
+  slotsByDate: Map<string, Slot[]>;
+  /** studentId → date → slot → present */
+  byStudent: Map<number, Map<string, Map<Slot, boolean>>>;
+}
+
+/** Fold one section's records once; see PreparedSection. */
+export function prepareSection(
   allRecords: AttendanceRecord[],
   scheduledDates?: string[],
-): SubjectEvaluation {
-  const dates = heldDates(allRecords, scheduledDates);
+): PreparedSection {
   const filter =
     scheduledDates && scheduledDates.length > 0 ? new Set(scheduledDates) : null;
 
-  // slot → held? and student presence, per date
   const held = new Map<string, Set<Slot>>();
-  const mine = new Map<string, Map<Slot, boolean>>();
+  const byStudent = new Map<number, Map<string, Map<Slot, boolean>>>();
   for (const r of allRecords) {
     if (filter && !filter.has(r.date)) continue;
     let slots = held.get(r.date);
     if (!slots) held.set(r.date, (slots = new Set()));
     slots.add(r.slot);
-    if (r.studentId === studentId) {
-      let m = mine.get(r.date);
-      if (!m) mine.set(r.date, (m = new Map()));
-      m.set(r.slot, r.present);
-    }
+
+    let dates = byStudent.get(r.studentId);
+    if (!dates) byStudent.set(r.studentId, (dates = new Map()));
+    let m = dates.get(r.date);
+    if (!m) dates.set(r.date, (m = new Map()));
+    m.set(r.slot, r.present);
   }
 
-  const days: DayEvaluation[] = dates.map((date) => {
-    const slots = [...(held.get(date) ?? [])].sort() as Slot[];
-    const presence = mine.get(date);
+  const dates = [...held.keys()].sort();
+  const slotsByDate = new Map<string, Slot[]>();
+  for (const [date, slots] of held) slotsByDate.set(date, [...slots].sort() as Slot[]);
+  return { scheduledDates: scheduledDates ?? [], dates, slotsByDate, byStudent };
+}
+
+/** One student's result, read off an already-folded section. */
+export function evaluatePrepared(
+  studentId: number,
+  prepared: PreparedSection,
+): SubjectEvaluation {
+  const mine = prepared.byStudent.get(studentId);
+
+  const days: DayEvaluation[] = prepared.dates.map((date) => {
+    const slots = prepared.slotsByDate.get(date) ?? [];
+    const presence = mine?.get(date);
     const presentIn = (s: Slot): boolean | null =>
       slots.includes(s) ? (presence?.get(s) ?? false) : null;
     const morning = presentIn('morning');
@@ -176,4 +203,19 @@ export function evaluateSubject(
           : 'fail';
 
   return { days, counts, totalDays, attendedRatio, overall };
+}
+
+/**
+ * Evaluate one student in one subject from the subject's full attendance
+ * records (all students — needed to know which slots were held).
+ *
+ * For more than one student in the same section, fold once with
+ * `prepareSection` and call `evaluatePrepared` per student instead.
+ */
+export function evaluateSubject(
+  studentId: number,
+  allRecords: AttendanceRecord[],
+  scheduledDates?: string[],
+): SubjectEvaluation {
+  return evaluatePrepared(studentId, prepareSection(allRecords, scheduledDates));
 }

@@ -3,12 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireRole } from '@/lib/authz';
 import { logActivity } from '@/lib/log';
-import {
-  createBackup,
-  deleteBackup,
-  restoreBackup,
-  restoreFromBuffer,
-} from '@/lib/backup';
+import { createBackup, deleteBackup, restoreBackup } from '@/lib/backup';
 import type { ActionResult } from '@/components/action-button';
 
 function fmtSize(bytes: number): string {
@@ -53,19 +48,6 @@ export async function restoreBackupAction(name: string): Promise<ActionResult> {
   }
 }
 
-export async function restoreUploadAction(formData: FormData): Promise<ActionResult> {
-  const user = await requireRole('admin');
-  const file = formData.get('file');
-  if (!(file instanceof File)) return { ok: false, message: 'ไม่พบไฟล์' };
-  if (file.size === 0) return { ok: false, message: 'ไฟล์ว่างเปล่า' };
-  if (file.size > 200 * 1024 * 1024) return { ok: false, message: 'ไฟล์ใหญ่เกิน 200MB' };
-  try {
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await restoreFromBuffer(buffer);
-    await logActivity(user, 'restore_upload', file.name, { size: file.size });
-    revalidatePath('/', 'layout');
-    return { ok: true, message: `กู้คืนจากไฟล์ ${file.name} สำเร็จ` };
-  } catch (e) {
-    return { ok: false, message: `กู้คืนไม่สำเร็จ: ${e instanceof Error ? e.message : 'error'}` };
-  }
-}
+/* Restoring from an UPLOADED archive is not here: it streams the file straight
+ * to disk through /api/backup/restore instead, so the app never holds a 200 MB
+ * body in memory and no other action inherits a 200 MB request ceiling. */

@@ -2,7 +2,7 @@ import 'server-only';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { admins, people } from '@/db/schema';
-import { verifyPassword } from './password';
+import { hashPassword, needsRehash, verifyPassword } from './password';
 import { schoolos, SchoolOsError } from './schoolos';
 import { hasAdminGrant } from './admin-grants';
 import type { SessionUser } from './session';
@@ -13,6 +13,20 @@ export interface LoginOutcome {
   error?: string;
   status?: number;
 }
+
+/**
+ * The one answer every rejected credential gets.
+ *
+ * The messages used to differ — "บัญชีผู้ดูแลไม่ถูกต้อง" for a disabled admin,
+ * "รหัสผ่านไม่ถูกต้อง" once a username was known to exist — which told anyone
+ * asking which usernames are real, and which of them is the ผู้ดูแล. A
+ * disabled account and an unknown one are now indistinguishable from outside.
+ */
+const BAD_CREDENTIAL: LoginOutcome = {
+  ok: false,
+  error: 'รหัสผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง',
+  status: 401,
+};
 
 /**
  * Verify a SchoolOS credential into a session user.
@@ -41,8 +55,7 @@ async function verifyPerson(
       // people to check the network instead of their password.
       if (e.status === 429)
         return { ok: false, error: 'พยายามเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่', status: 429 };
-      if (e.status === 401)
-        return { ok: false, error: 'รหัสผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง', status: 401 };
+      if (e.status === 401) return BAD_CREDENTIAL;
       if (e.status === 403)
         return {
           ok: false,
@@ -54,8 +67,7 @@ async function verifyPerson(
     return { ok: false, error: 'เกิดข้อผิดพลาด', status: 500 };
   }
 
-  if (!verify.valid || !verify.user)
-    return { ok: false, error: 'รหัสผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง', status: 401 };
+  if (!verify.valid || !verify.user) return BAD_CREDENTIAL;
   if (!verify.user.active)
     return { ok: false, error: 'บัญชีถูกปิดใช้งาน / พ้นสภาพแล้ว', status: 403 };
 
@@ -141,10 +153,29 @@ async function verifyPerson(
 }
 
 /**
+ * Which kind of account this username most likely belongs to, from the mirror
+ * this app already keeps. Only ever used to decide which SchoolOS endpoint to
+ * try FIRST — a wrong guess costs nothing but the fallback.
+ *
+ * Worth the query: without it every student login sent their password to the
+ * teacher verify endpoint before the student one, doubling the calls (and the
+ * chance of tripping the Users Service's own 429) on the common case.
+ */
+async function likelyType(username: string): Promise<'teacher' | 'student' | null> {
+  const [row] = await db
+    .select({ type: people.type })
+    .from(people)
+    .where(eq(people.code, username))
+    .limit(1);
+  return row?.type === 'teacher' || row?.type === 'student' ? row.type : null;
+}
+
+/**
  * Resolve a login attempt.
  *  1. If the username matches a local admin account → verify it (admin only).
- *  2. Otherwise verify against SchoolOS as a teacher, then as a student,
- *     preferring the most informative failure (a non-401 beats a plain 401).
+ *  2. Otherwise verify against SchoolOS, trying the type the local mirror
+ *     suggests first, preferring the most informative failure (a non-401 beats
+ *     a plain 401).
  */
 export async function resolveLogin(
   username: string,
@@ -156,20 +187,37 @@ export async function resolveLogin(
     .where(eq(admins.username, username))
     .limit(1);
   if (adminRow) {
-    if (!adminRow.active) return { ok: false, error: 'บัญชีผู้ดูแลไม่ถูกต้อง', status: 401 };
+    if (!adminRow.active) return BAD_CREDENTIAL;
     const good = await verifyPassword(password, adminRow.passwordHash);
-    if (!good) return { ok: false, error: 'รหัสผ่านไม่ถูกต้อง', status: 401 };
+    if (!good) return BAD_CREDENTIAL;
+    // The only moment the plaintext is in hand, so it is the only moment an
+    // old-cost hash can be quietly upgraded. Best-effort: a failure here must
+    // not cost anyone their login.
+    if (needsRehash(adminRow.passwordHash)) {
+      try {
+        await db
+          .update(admins)
+          .set({ passwordHash: await hashPassword(password) })
+          .where(eq(admins.id, adminRow.id));
+      } catch {
+        /* keep the working hash */
+      }
+    }
     return {
       ok: true,
       user: { sub: `admin:${adminRow.id}`, role: 'admin', name: adminRow.name, adminId: adminRow.id },
     };
   }
 
+  const first = await likelyType(username);
+  const order: ReadonlyArray<'teacher' | 'student'> =
+    first === 'student' ? ['student', 'teacher'] : ['teacher', 'student'];
+
   let best: LoginOutcome | null = null;
-  for (const type of ['teacher', 'student'] as const) {
+  for (const type of order) {
     const outcome = await verifyPerson(type, username, password);
     if (outcome.ok) return outcome;
     if (!best || (outcome.status && outcome.status !== 401)) best = outcome;
   }
-  return best ?? { ok: false, error: 'รหัสผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง', status: 401 };
+  return best ?? BAD_CREDENTIAL;
 }

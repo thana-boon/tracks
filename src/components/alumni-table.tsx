@@ -4,6 +4,7 @@ import * as React from 'react';
 import { FileText, Search, UserRoundX } from 'lucide-react';
 import type { AlumniRow } from '@/lib/alumni';
 import { Badge, Button, EmptyState, Input, Select } from '@/components/ui';
+import { withBasePath } from '@/lib/base-path';
 
 /**
  * รายชื่อนักเรียนที่จบ/ลาออก — อ่านอย่างเดียว
@@ -115,7 +116,7 @@ export function AlumniTable({
                 <td className="px-4 py-3 text-right">
                   {r.passedCount > 0 ? (
                     <a
-                      href={`/api/transcript?students=${r.id}`}
+                      href={withBasePath(`/api/transcript?students=${r.id}`)}
                       target="_blank"
                       rel="noopener noreferrer"
                     >

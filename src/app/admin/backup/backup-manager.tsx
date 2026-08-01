@@ -1,18 +1,15 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { DatabaseBackup, Download, Trash2, RotateCcw, Upload, Loader2, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardHeader, Button, Badge, EmptyState } from '@/components/ui';
 import { useDialog } from '@/components/dialog';
 import { ActionButton } from '@/components/action-button';
 import { thaiDateTimeLongOf } from '@/lib/utils';
-import {
-  createBackupAction,
-  deleteBackupAction,
-  restoreBackupAction,
-  restoreUploadAction,
-} from './actions';
+import { withBasePath } from '@/lib/base-path';
+import { createBackupAction, deleteBackupAction, restoreBackupAction } from './actions';
 
 export interface BackupRow {
   name: string;
@@ -28,6 +25,7 @@ function fmtSize(bytes: number): string {
 
 export function BackupManager({ backups }: { backups: BackupRow[] }) {
   const dialog = useDialog();
+  const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -64,12 +62,30 @@ export function BackupManager({ backups }: { backups: BackupRow[] }) {
       return;
     }
     setUploading(true);
-    const fd = new FormData();
-    fd.set('file', file);
-    const r = await restoreUploadAction(fd);
-    setUploading(false);
-    if (fileRef.current) fileRef.current.value = '';
-    r.ok ? toast.success(r.message) : toast.error(r.message);
+    try {
+      // Streamed as the raw body — see /api/backup/restore. A FormData post
+      // through a server action would buffer the whole archive in memory first.
+      const res = await fetch(withBasePath('/api/backup/restore'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-File-Name': encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(data.message ?? 'กู้คืนสำเร็จ');
+        router.refresh();
+      } else {
+        toast.error(data.error ?? 'กู้คืนไม่สำเร็จ');
+      }
+    } catch {
+      toast.error('อัปโหลดไม่สำเร็จ — การเชื่อมต่อขาด');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
   }
 
   return (
@@ -93,6 +109,10 @@ export function BackupManager({ backups }: { backups: BackupRow[] }) {
             <p className="font-medium text-destructive">การกู้คืนเขียนทับข้อมูลทั้งหมด</p>
             <p className="mt-0.5 text-muted-foreground">
               ควรสำรองข้อมูลปัจจุบันก่อนกู้คืนทุกครั้ง — การกู้คืนจะลบและแทนที่ตารางทั้งหมด
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              ใช้เฉพาะไฟล์ที่ระบบนี้สร้างเอง — pg_restore จะรันคำสั่งทุกอย่างที่อยู่ในไฟล์
+              ไฟล์จากแหล่งอื่นเท่ากับให้สิทธิ์ฐานข้อมูลกับคนที่สร้างไฟล์นั้น
             </p>
           </div>
         </div>
@@ -135,7 +155,7 @@ export function BackupManager({ backups }: { backups: BackupRow[] }) {
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <a
-                    href={`/api/backup/${encodeURIComponent(b.name)}`}
+                    href={withBasePath(`/api/backup/${encodeURIComponent(b.name)}`)}
                     title="ดาวน์โหลด"
                     className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
                   >

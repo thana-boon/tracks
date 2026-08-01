@@ -26,6 +26,7 @@ services:
     container_name: tracks-migrate
     environment:
       DATABASE_URL: ${DATABASE_URL_INTERNAL:?set DATABASE_URL_INTERNAL in .env}
+      TZ: ${TZ:-Asia/Bangkok}
     networks:
       - school-net
     # The DB lives outside this stack, so we cannot depends_on its health.
@@ -34,7 +35,14 @@ services:
     restart: on-failure:5
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # Path prefix nginx serves the app under. Compiled into the bundle and
+        # into every /_next/* URL, so it is a BUILD arg, not an env var —
+        # changing it needs `up -d --build`. nginx must pass this prefix
+        # through unchanged (see deploy/nginx-track.conf).
+        NEXT_PUBLIC_BASE_PATH: ${BASE_PATH:-/tracks}
     container_name: tracks-app
     restart: unless-stopped
     # Gates on `migrate` only — the schema must exist before the app boots and
@@ -44,10 +52,15 @@ services:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: ${DATABASE_URL_INTERNAL:?set DATABASE_URL_INTERNAL in .env}
+      TZ: ${TZ:-Asia/Bangkok}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      # Idle timeout: sessions renew themselves while in use, so this is how
+      # long an unused one lasts. SESSION_MAX_HOURS caps one login outright.
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-12h}
-      # Keep false for plain-HTTP LAN access (http://<ip>:3004); true behind HTTPS.
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SESSION_MAX_HOURS: ${SESSION_MAX_HOURS:-24}
+      # Secure by default — set COOKIE_SECURE=false in .env only for plain-HTTP
+      # LAN access (http://<ip>:3004), never behind the HTTPS nginx.
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
       SCHOOLOS_API_BASE_URL: ${SCHOOLOS_API_BASE_URL:?set SCHOOLOS_API_BASE_URL in .env}
       SCHOOLOS_API_KEY: ${SCHOOLOS_API_KEY:?set SCHOOLOS_API_KEY in .env}
       # Minutes between background roster syncs (ปี → นักเรียน → ครู → ที่ปรึกษา).

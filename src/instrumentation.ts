@@ -11,7 +11,17 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { bootstrapAdmin } = await import('./lib/bootstrap');
+    const { bootstrapAdmin, checkSessionConfig } = await import('./lib/bootstrap');
+    // Before anything else: a session signed with the example secret is not a
+    // session. Warns in development; in production this is a refusal to boot,
+    // and exiting is the only way to make it one — a throw here is caught and
+    // logged by Next, which would leave the server up and pretending.
+    try {
+      checkSessionConfig();
+    } catch (e) {
+      console.error(e instanceof Error ? e.message : e);
+      process.exit(1);
+    }
     await bootstrapAdmin();
     const { startAutoSync } = await import('./lib/auto-sync');
     startAutoSync();

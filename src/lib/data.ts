@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   attendance,
@@ -10,7 +10,12 @@ import {
   trackGroups,
   trackSubjects,
 } from '@/db/schema';
-import { evaluateSubject, type AttendanceRecord } from './evaluate';
+import {
+  evaluatePrepared,
+  prepareSection,
+  type AttendanceRecord,
+  type PreparedSection,
+} from './evaluate';
 
 /** A student, minimal shape used across roster/attendance/results screens. */
 export interface StudentRow {
@@ -208,6 +213,58 @@ export async function attendanceRecords(sectionId: number): Promise<AttendanceRe
 }
 
 /**
+ * Attendance + schedule for many sections in TWO queries, folded ready to
+ * evaluate — the shape every multi-student read wants.
+ *
+ * The per-section version of this (one pair of queries per section, fired
+ * through a pool of 10) was the other half of why a whole-ชั้น export crawled:
+ * a ม.6 transcript spans three years of sections, i.e. hundreds of round trips
+ * before any PDF work started.
+ */
+export async function prepareSections(
+  sectionIds: number[],
+): Promise<Map<number, PreparedSection>> {
+  const ids = [...new Set(sectionIds)];
+  const out = new Map<number, PreparedSection>();
+  if (ids.length === 0) return out;
+
+  const [records, dates] = await Promise.all([
+    db
+      .select({
+        sectionId: attendance.sectionId,
+        date: attendance.date,
+        slot: attendance.slot,
+        studentId: attendance.studentId,
+        present: attendance.present,
+      })
+      .from(attendance)
+      .where(inArray(attendance.sectionId, ids)),
+    db
+      .select({ sectionId: subjectDates.sectionId, date: subjectDates.date })
+      .from(subjectDates)
+      .where(inArray(subjectDates.sectionId, ids))
+      .orderBy(asc(subjectDates.date)),
+  ]);
+
+  const recordsBy = new Map<number, AttendanceRecord[]>();
+  for (const r of records) {
+    const arr = recordsBy.get(r.sectionId) ?? [];
+    arr.push({ date: r.date, slot: r.slot, studentId: r.studentId, present: r.present });
+    recordsBy.set(r.sectionId, arr);
+  }
+  const datesBy = new Map<number, string[]>();
+  for (const d of dates) {
+    const arr = datesBy.get(d.sectionId) ?? [];
+    arr.push(d.date);
+    datesBy.set(d.sectionId, arr);
+  }
+
+  for (const id of ids)
+    out.set(id, prepareSection(recordsBy.get(id) ?? [], datesBy.get(id) ?? []));
+  return out;
+}
+
+/**
  * Evaluate every assigned student in a section at once — one attendance query,
  * one schedule query, then the pure evaluator per student.
  */
@@ -217,9 +274,10 @@ export async function evaluateAll(sectionId: number) {
     attendanceRecords(sectionId),
     classDatesOf(sectionId),
   ]);
+  const prepared = prepareSection(records, dates);
   return students.map((s) => ({
     student: s,
-    evaluation: evaluateSubject(s.id, records, dates),
+    evaluation: evaluatePrepared(s.id, prepared),
   }));
 }
 

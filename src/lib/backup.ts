@@ -1,7 +1,7 @@
 import 'server-only';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readdir, stat, unlink, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, unlink, readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -18,10 +18,28 @@ function dir(): string {
   return process.env.BACKUP_DIR?.trim() || join(process.cwd(), 'backups');
 }
 
-function dbUrl(): string {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error('DATABASE_URL is not set');
-  return url;
+/**
+ * The connection for pg_dump/pg_restore, with the password moved out of argv.
+ *
+ * A command's arguments are readable by anything that can list processes, so
+ * passing the whole DATABASE_URL as one put the database password on show for
+ * the length of every dump. libpq reads PGPASSWORD from the environment
+ * instead, which is not; the URI keeps everything else.
+ */
+function connection(): { uri: string; env: NodeJS.ProcessEnv } {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) throw new Error('DATABASE_URL is not set');
+  try {
+    const url = new URL(raw);
+    const password = decodeURIComponent(url.password);
+    if (!password) return { uri: raw, env: process.env };
+    url.password = '';
+    return { uri: url.toString(), env: { ...process.env, PGPASSWORD: password } };
+  } catch {
+    // Not a URL we can parse (a libpq key=value string, say) — hand it over
+    // untouched rather than refusing to back the database up.
+    return { uri: raw, env: process.env };
+  }
 }
 
 /** A backup filename must be a plain timestamped .dump — never a path. */
@@ -60,9 +78,11 @@ export async function createBackup(): Promise<BackupFile> {
   await mkdir(d, { recursive: true });
   const name = `tracks-${stamp()}.dump`;
   const path = join(d, name);
+  const { uri, env } = connection();
   // -Fc custom format, --no-owner so a restore doesn't fight role ownership.
-  await run('pg_dump', ['-Fc', '--no-owner', '--no-privileges', '-f', path, dbUrl()], {
+  await run('pg_dump', ['-Fc', '--no-owner', '--no-privileges', '-f', path, uri], {
     maxBuffer: 1024 * 1024 * 64,
+    env,
   });
   const st = await stat(path);
   return { name, size: st.size, createdAt: st.mtime };
@@ -78,29 +98,42 @@ export async function readBackup(name: string): Promise<Buffer> {
   return readFile(join(dir(), name));
 }
 
+/** Run pg_restore against an archive already on disk. Destructive: --clean. */
+async function pgRestore(path: string): Promise<void> {
+  const { uri, env } = connection();
+  await run(
+    'pg_restore',
+    ['--clean', '--if-exists', '--no-owner', '--no-privileges', '-d', uri, path],
+    { maxBuffer: 1024 * 1024 * 64, env },
+  );
+}
+
 /** Restore from an existing backup file. Destructive: --clean --if-exists. */
 export async function restoreBackup(name: string): Promise<void> {
   if (!isValidBackupName(name)) throw new Error('bad name');
   const path = join(dir(), name);
   await stat(path); // throws if missing
-  await run(
-    'pg_restore',
-    ['--clean', '--if-exists', '--no-owner', '--no-privileges', '-d', dbUrl(), path],
-    { maxBuffer: 1024 * 1024 * 64 },
-  );
+  await pgRestore(path);
 }
 
-/** Restore from an uploaded custom-format archive (written to a temp file first). */
-export async function restoreFromBuffer(buffer: Buffer): Promise<void> {
-  const tmp = join(tmpdir(), `tracks-restore-${Date.now()}.dump`);
-  await writeFile(tmp, buffer);
-  try {
-    await run(
-      'pg_restore',
-      ['--clean', '--if-exists', '--no-owner', '--no-privileges', '-d', dbUrl(), tmp],
-      { maxBuffer: 1024 * 1024 * 64 },
-    );
-  } finally {
-    await unlink(tmp).catch(() => {});
-  }
+/**
+ * A private directory for one uploaded archive, and its cleanup.
+ *
+ * mkdtemp rather than a name built from the clock: the old
+ * `tracks-restore-<Date.now()>.dump` was guessable, and a guessable path in a
+ * shared /tmp is a file anything else on the box can get in front of. The
+ * caller streams the upload into `path`, then calls restoreUploaded().
+ */
+export async function newUploadSlot(): Promise<{ path: string; cleanup: () => Promise<void> }> {
+  const base = await mkdtemp(join(tmpdir(), 'tracks-restore-'));
+  return {
+    path: join(base, 'upload.dump'),
+    cleanup: () => rm(base, { recursive: true, force: true }).catch(() => {}),
+  };
+}
+
+/** Restore from an uploaded custom-format archive written by newUploadSlot(). */
+export async function restoreUploaded(path: string): Promise<void> {
+  await stat(path); // throws if the upload never landed
+  await pgRestore(path);
 }

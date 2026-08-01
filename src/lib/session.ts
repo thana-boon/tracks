@@ -1,52 +1,34 @@
 import 'server-only';
-import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
+import { withBasePath } from './base-path';
+import {
+  SESSION_COOKIE,
+  sessionCookieOptions,
+  verifySession,
+  type SessionUser,
+} from './session-core';
 
-export const SESSION_COOKIE = 'tracks_session';
+/**
+ * Reading and writing the session cookie from server components, route handlers
+ * and server actions. The signing itself — and everything the middleware also
+ * needs — lives in session-core.ts.
+ */
 
-export type AppRole = 'admin' | 'teacher' | 'student';
-
-export interface SessionUser {
-  /** stable subject: `admin:<id>` or `person:<personId>` */
-  sub: string;
-  role: AppRole;
-  name: string;
-  /** ชื่อจริง without the คำนำหน้า — what the avatar initial is taken from */
-  firstName?: string;
-  /** local admin id, when the session came from a local admin account */
-  adminId?: number;
-  /** people.id, when the session came from a SchoolOS teacher/student */
-  personId?: number;
-}
+export {
+  SESSION_COOKIE,
+  createSession,
+  verifySession,
+  sessionTtlSeconds,
+  sessionMaxSeconds,
+  shouldRenew,
+  sessionCookieOptions,
+} from './session-core';
+export type { AppRole, SessionUser, SessionClaims } from './session-core';
 
 /** Where the shell reads this user's account photo, if they can have one. */
 export function photoUrlOf(user: SessionUser): string | null {
-  return user.personId ? `/api/photo/${user.personId}` : null;
-}
-
-function secret(): Uint8Array {
-  const s = process.env.JWT_SECRET;
-  if (!s) throw new Error('JWT_SECRET is not set');
-  return new TextEncoder().encode(s);
-}
-
-export async function createSession(user: SessionUser): Promise<string> {
-  const expiresIn = process.env.JWT_EXPIRES_IN ?? '12h';
-  return new SignJWT({ ...user, typ: 'session' })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime(expiresIn)
-    .sign(secret());
-}
-
-export async function verifySession(token: string): Promise<SessionUser | null> {
-  try {
-    const { payload } = await jwtVerify(token, secret());
-    if (payload.typ !== 'session') return null;
-    return payload as unknown as SessionUser;
-  } catch {
-    return null;
-  }
+  // Handed straight to <img src>, so it needs the basePath itself.
+  return user.personId ? withBasePath(`/api/photo/${user.personId}`) : null;
 }
 
 /** Read the current session from the request cookies (server components / routes). */
@@ -59,13 +41,7 @@ export async function getSession(): Promise<SessionUser | null> {
 
 export async function setSessionCookie(token: string): Promise<void> {
   const store = await cookies();
-  store.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.COOKIE_SECURE === 'true',
-    path: '/',
-    maxAge: 60 * 60 * 12,
-  });
+  store.set(SESSION_COOKIE, token, sessionCookieOptions());
 }
 
 export async function clearSessionCookie(): Promise<void> {

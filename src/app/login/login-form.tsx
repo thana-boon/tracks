@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Eye, EyeOff, LogIn, Loader2 } from 'lucide-react';
 import { Button, Input, Label } from '@/components/ui';
+import { withBasePath } from '@/lib/base-path';
 
 export function LoginForm() {
   const router = useRouter();
@@ -14,12 +15,22 @@ export function LoginForm() {
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // requireUser sends people here with ?gone=1 when the roster says the account
+  // has left the school. Their cookie is still cryptographically valid, so drop
+  // it — a server component cannot, and leaving it means every link bounces.
+  const gone = params.get('gone');
+  useEffect(() => {
+    if (!gone) return;
+    void fetch(withBasePath('/api/auth/logout'), { method: 'POST' });
+    toast.error('บัญชีนี้ไม่มีสิทธิ์ใช้งานแล้ว — ติดต่อผู้ดูแลหากคิดว่าผิดพลาด');
+  }, [gone]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (loading) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(withBasePath('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -30,8 +41,12 @@ export function LoginForm() {
         return;
       }
       toast.success(`ยินดีต้อนรับ ${data.name ?? ''}`.trim());
+      // `next` comes off the query string: only a path within this app is a
+      // legal destination. "//evil.example" also starts with "/" and would send
+      // them off-site, so it has to be excluded explicitly.
       const next = params.get('next');
-      router.replace(next && next.startsWith('/') ? next : data.redirect ?? '/');
+      const safeNext = next && next.startsWith('/') && !next.startsWith('//') ? next : null;
+      router.replace(safeNext ?? data.redirect ?? '/');
       router.refresh();
     } catch {
       toast.error('เชื่อมต่อไม่สำเร็จ');

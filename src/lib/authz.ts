@@ -1,22 +1,66 @@
 import 'server-only';
 import { redirect } from 'next/navigation';
+import { eq } from 'drizzle-orm';
+import { db } from '@/db';
+import { people } from '@/db/schema';
 import { getSession, type AppRole, type SessionUser } from './session';
-import { effectiveTeacherRole } from './admin-grants';
+import { hasAdminGrant, isSchoolOsAdmin } from './admin-grants';
 
 /**
- * Re-resolve a teacher session's role against the database.
+ * Statuses that end someone's access the moment the roster sync records them.
  *
- * The JWT carries the role it was minted with, but admin here can also come
- * from a local grant (หน้าสิทธิ์) that an admin adds or pulls at any time. Any
- * page load re-reads it, so a grant applies — and a revoke bites — without
- * waiting for a 12-hour session to expire. Local admins and students skip the
- * query: neither can be changed by a grant.
+ * Deliberately a denylist of the values this app knows (alumni.ts defines the
+ * two student ones; teacher statuses are mirrored verbatim from the Users
+ * Service). An allowlist would be tighter, but an unexpected upstream string
+ * would then lock every teacher out of the school's own system — the wrong way
+ * round to fail.
  */
-async function withEffectiveRole(user: SessionUser): Promise<SessionUser> {
-  if (user.adminId || user.role === 'student' || !user.personId) return user;
+const GONE: ReadonlySet<string> = new Set([
+  'graduated',
+  'withdrawn',
+  'resigned',
+  'retired',
+  'terminated',
+  'inactive',
+  'suspended',
+]);
+
+/**
+ * Re-resolve a person session against the database.
+ *
+ * Two things the JWT cannot be trusted for, both re-read on every page load:
+ *
+ *  - the role. Admin here can come from a local grant (หน้าสิทธิ์) added or
+ *    pulled at any time, so a grant applies — and a revoke bites — without
+ *    waiting for the session to expire.
+ *  - whether the account still exists at all. A student who has graduated or a
+ *    teacher who has left otherwise kept full access until their token ran out.
+ *
+ * Returns null when the session should end. Local admins skip the query: they
+ * are this app's own accounts, and neither a grant nor a roster sync touches
+ * them.
+ */
+async function withEffectiveRole(user: SessionUser): Promise<SessionUser | null> {
+  if (user.adminId) return user;
+  if (!user.personId) return user;
   try {
-    const role = await effectiveTeacherRole(user.personId);
-    return role && role !== user.role ? { ...user, role } : user;
+    const [row] = await db
+      .select({
+        type: people.type,
+        status: people.status,
+        schoolosRole: people.schoolosRole,
+      })
+      .from(people)
+      .where(eq(people.id, user.personId))
+      .limit(1);
+    if (!row || GONE.has(row.status)) return null;
+    if (row.type !== 'teacher' || user.role === 'student') return user;
+
+    const role: AppRole =
+      isSchoolOsAdmin(row.schoolosRole) || (await hasAdminGrant(user.personId))
+        ? 'admin'
+        : 'teacher';
+    return role === user.role ? user : { ...user, role };
   } catch {
     // A momentarily unreachable DB must not log everyone out; the JWT's own
     // role is the safe fallback — it can only be as broad as it was at login.
@@ -28,7 +72,9 @@ async function withEffectiveRole(user: SessionUser): Promise<SessionUser> {
 export async function requireUser(): Promise<SessionUser> {
   const user = await getSession();
   if (!user) redirect('/login');
-  return withEffectiveRole(user);
+  const live = await withEffectiveRole(user);
+  if (!live) redirect('/login?gone=1');
+  return live;
 }
 
 /**

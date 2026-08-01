@@ -14,10 +14,28 @@ export async function logActivity(
   target?: string,
   detail?: Record<string, unknown> | object,
 ): Promise<void> {
+  return logEvent(actorOf(user), user.name, action, target, detail);
+}
+
+/**
+ * The same row, for something that happened without a session behind it.
+ *
+ * A failed login is the case this exists for: it has no SessionUser by
+ * definition, which is why nothing used to record it — so a run of guesses
+ * against the ผู้ดูแล account left no trace at all, and only the successful one
+ * showed up in the log.
+ */
+export async function logEvent(
+  actor: string,
+  actorName: string,
+  action: string,
+  target?: string,
+  detail?: Record<string, unknown> | object,
+): Promise<void> {
   try {
     await db.insert(activityLogs).values({
-      actor: actorOf(user),
-      actorName: user.name,
+      actor,
+      actorName,
       action,
       target: target ?? null,
       detail: detail ?? null,

@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Menu, X, LogOut, PanelLeftClose, PanelLeft, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { withBasePath } from '@/lib/base-path';
 import { Avatar } from './avatar';
 import {
   navFor,
@@ -234,7 +235,7 @@ function SidebarContent({
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
 
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    await fetch(withBasePath('/api/auth/logout'), { method: 'POST' });
     toast.success('ออกจากระบบแล้ว');
     router.replace('/login');
     router.refresh();

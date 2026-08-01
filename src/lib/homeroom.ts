@@ -9,8 +9,8 @@ import {
   trackGroups,
   trackSubjects,
 } from '@/db/schema';
-import { attendanceRecords, classDatesOf } from './data';
-import { evaluateSubject, type DayResult } from './evaluate';
+import { prepareSections } from './data';
+import { evaluatePrepared, type DayResult } from './evaluate';
 import type { HomeroomReportEntry, ReportDay, ReportStudent } from './attendance-summary';
 import type { YearRow } from './years';
 
@@ -192,22 +192,13 @@ export async function buildHomeroomReport(
     )
     .orderBy(asc(trackGroups.code), asc(trackSubjects.code), asc(subjectSections.name));
 
-  const sectionIds = [...new Set(regs.map((r) => r.sectionId))];
-  const cache = new Map<
-    number,
-    { records: Awaited<ReturnType<typeof attendanceRecords>>; dates: string[] }
-  >();
-  await Promise.all(
-    sectionIds.map(async (sid) => {
-      const [records, dates] = await Promise.all([attendanceRecords(sid), classDatesOf(sid)]);
-      cache.set(sid, { records, dates });
-    }),
-  );
+  const cache = await prepareSections(regs.map((r) => r.sectionId));
 
   const daysBy = new Map<number, ReportDay[]>();
   for (const r of regs) {
-    const { records, dates } = cache.get(r.sectionId)!;
-    const e = evaluateSubject(r.studentId, records, dates);
+    const prepared = cache.get(r.sectionId)!;
+    const dates = prepared.scheduledDates;
+    const e = evaluatePrepared(r.studentId, prepared);
     const held = new Map(e.days.map((d) => [d.date, d]));
 
     const rows = daysBy.get(r.studentId) ?? [];
