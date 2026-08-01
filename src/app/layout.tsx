@@ -14,8 +14,8 @@ const font = IBM_Plex_Sans_Thai({
 export const metadata: Metadata = {
   // Pages set their own titles; the template keeps the branding on all of them.
   title: {
-    default: 'Tracks - SchoolOS | โรงเรียนสุคนธรวิทย์',
-    template: '%s · Tracks - SchoolOS | โรงเรียนสุคนธรวิทย์',
+    default: 'User - SchoolOS | โรงเรียนสุคนธรวิทย์',
+    template: '%s · User - SchoolOS | โรงเรียนสุคนธรวิทย์',
   },
   description: 'ระบบวิชาเสริม ม.4-6 โรงเรียนสุคนธีรวิทย์',
 };
