@@ -90,6 +90,28 @@ export interface VerifyResult {
   error?: { code: string; message: string };
 }
 
+/**
+ * What a spent handoff code buys: who the browser was signed in as.
+ *
+ * `sub` is the teacher_code / student_code, not a numeric id, and `role` is only
+ * ever `teacher` | `student` — `teacher-admin` shows up as `users:write` in
+ * `permissions` instead. Neither `active` nor `status` is here at all, which is
+ * why redeeming is never the end of the story (see lib/sso.ts).
+ */
+export interface RedeemResult {
+  valid: boolean;
+  user?: {
+    sub: string;
+    role: 'teacher' | 'student';
+    name: string | null;
+    code: string | null;
+    permissions: string[];
+  };
+  audience?: string;
+  expiresAt?: number;
+  absoluteEndsAt?: number;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function request<T>(
@@ -216,6 +238,45 @@ export const schoolos = {
       method: 'POST',
       body: JSON.stringify({ role, username, password }),
     }),
+
+  /**
+   * Spend a one-time handoff code for the identity behind it (scope
+   * `auth:handoff`, and the key must name our audience).
+   *
+   * Deliberately NOT routed through `request()`: that retries a 429 after a
+   * backoff, and a handoff code lives 60 seconds. Retrying would either waste
+   * most of that window or — if the first attempt did reach the consume step —
+   * come back `used_code`, which is precisely the answer nobody can act on. One
+   * attempt; a failure means asking the browser for a fresh code, never sending
+   * this one again.
+   */
+  async redeemHandoff(code: string): Promise<RedeemResult> {
+    if (!KEY) throw new SchoolOsError(500, 'no_key', 'SCHOOLOS_API_KEY is not set');
+
+    const res = await fetch(`${BASE}/api/public/v1/auth/handoff/redeem`, {
+      method: 'POST',
+      headers: { 'X-API-Key': KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+      cache: 'no-store',
+    });
+
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      /* non-JSON */
+    }
+
+    if (!res.ok) {
+      const err = (body as { error?: { code: string; message: string } })?.error;
+      throw new SchoolOsError(
+        res.status,
+        err?.code ?? 'redeem_failed',
+        err?.message ?? `SchoolOS ${res.status}`,
+      );
+    }
+    return body as RedeemResult;
+  },
 
   /**
    * Pull every page of students in the given grade.

@@ -5,13 +5,41 @@ import { admins, people } from '@/db/schema';
 import { hashPassword, needsRehash, verifyPassword } from './password';
 import { schoolos, SchoolOsError } from './schoolos';
 import { hasAdminGrant } from './admin-grants';
-import type { SessionUser } from './session';
+import { isTrackGrade } from './utils';
+import type { SessionUser, SessionVia } from './session';
 
 export interface LoginOutcome {
   ok: boolean;
   user?: SessionUser;
   error?: string;
   status?: number;
+}
+
+/**
+ * A SchoolOS person, however we came to be sure of them — the password form's
+ * `/auth/verify` answer, or the roster lookup that follows an SSO handoff.
+ *
+ * The two arrive by completely different routes and must end up governed by
+ * exactly one set of rules; this is the shape both are flattened into before
+ * `admitTeacher` / `admitStudent` decide anything.
+ */
+export interface SchoolOsIdentity {
+  /** teachers.id / students.id in the Users Service */
+  id: number;
+  code: string;
+  name: string;
+  /** teachers only: `teacher` | `teacher-admin`, straight from the roster */
+  role: string;
+  /** `active`/`resigned` for teachers, `studying`/`graduated`/… for students */
+  status: string;
+  /**
+   * Students only: the grade the roster reports for them *right now*.
+   *
+   * Absent on the password path — `/auth/verify` does not carry a grade — so
+   * `admitStudent` falls back to the mirror. The SSO path does look the student
+   * up in the roster and fills it in, and that fresher answer wins.
+   */
+  gradeLevel?: string | null;
 }
 
 /**
@@ -29,15 +57,138 @@ const BAD_CREDENTIAL: LoginOutcome = {
 };
 
 /**
- * Verify a SchoolOS credential into a session user.
+ * Admit a verified teacher.
  *
- *  - teacher: the Users Service is authoritative for the role — `teacher-admin`
- *    enters this system as admin, plain `teacher` as teacher (spec §2). The
- *    person row is upserted from the verify payload so a teacher can log in
- *    before the roster sync has run.
- *  - student: requires a synced `people` row — this system only serves ม.4-6,
- *    and the sync (admin > รายชื่อ) is what scopes the roster to those grades.
+ * The Users Service is authoritative for the role — `teacher-admin` enters this
+ * system as admin, plain `teacher` as teacher (spec §2). The person row is
+ * upserted from the identity so a teacher can get in before the roster sync has
+ * ever run.
+ *
+ * Shared deliberately with the SSO route. When these rules lived inside the
+ * password path alone, the second entrance had to restate them, and two copies
+ * of "who may come in" drift — the day they disagree, somebody gets in through
+ * one door who is refused at the other, and nobody finds out from the code.
  */
+export async function admitTeacher(
+  identity: SchoolOsIdentity,
+  via: SessionVia,
+): Promise<LoginOutcome> {
+  const [existing] = await db
+    .select({ id: people.id, fullName: people.fullName, firstName: people.firstName })
+    .from(people)
+    .where(and(eq(people.type, 'teacher'), eq(people.schoolosId, identity.id)))
+    .limit(1);
+
+  let personId: number;
+  if (existing) {
+    personId = existing.id;
+    await db
+      .update(people)
+      .set({ schoolosRole: identity.role, status: identity.status, syncedAt: new Date() })
+      .where(eq(people.id, personId));
+  } else {
+    const name = identity.name || identity.code;
+    const [inserted] = await db
+      .insert(people)
+      .values({
+        type: 'teacher',
+        schoolosId: identity.id,
+        code: identity.code,
+        firstName: name,
+        lastName: '',
+        fullName: name,
+        schoolosRole: identity.role,
+        status: identity.status,
+      })
+      .returning({ id: people.id });
+    personId = inserted.id;
+  }
+
+  // Two independent ways to be an admin here: the Users Service says so, or
+  // this school added a local grant on หน้าสิทธิ์. Neither can revoke the
+  // other — the grant is additive by design.
+  const role: 'admin' | 'teacher' =
+    identity.role === 'teacher-admin' || (await hasAdminGrant(personId)) ? 'admin' : 'teacher';
+
+  return {
+    ok: true,
+    user: {
+      sub: `person:${personId}`,
+      role,
+      name: identity.name || identity.code,
+      // The synced row is the only place ชื่อจริง is split out; before the
+      // first sync the avatar falls back to stripping the คำนำหน้า itself.
+      firstName: existing?.firstName,
+      personId,
+      via,
+    },
+  };
+}
+
+/**
+ * Admit a verified student — ม.4, ม.5 หรือ ม.6 เท่านั้น, and only with a synced
+ * `people` row. A ม.1 student verifies perfectly well upstream and still has no
+ * business here: วิชาเสริม is a ม.ปลาย programme.
+ *
+ * Two independent checks, because each covers what the other cannot. The row
+ * has to exist at all — the sync (admin > รายชื่อ) only ever pulls TRACK_GRADES,
+ * so a junior student has nothing to match. And the grade on whichever record
+ * is freshest has to actually be one of the three. Until now only the first was
+ * enforced, which made "ม.4-6 only" a property of how the sync happened to be
+ * configured rather than a rule this system states: widen TRACK_GRADES for one
+ * report, or leave behind a row from a student who has since moved down, and
+ * the login quietly widens with it. The grade is now asked about out loud.
+ */
+export async function admitStudent(
+  identity: SchoolOsIdentity,
+  via: SessionVia,
+): Promise<LoginOutcome> {
+  const [student] = await db
+    .select({
+      id: people.id,
+      fullName: people.fullName,
+      firstName: people.firstName,
+      gradeLevel: people.gradeLevel,
+    })
+    .from(people)
+    .where(and(eq(people.type, 'student'), eq(people.schoolosId, identity.id)))
+    .limit(1);
+  if (!student)
+    return {
+      ok: false,
+      error: 'ระบบวิชาเสริมใช้เฉพาะนักเรียน ม.4-6 ที่ซิงก์รายชื่อแล้ว — ติดต่อผู้ดูแล',
+      status: 403,
+    };
+
+  // The roster's answer when we have one, the mirror's otherwise. `??` on
+  // purpose: a null from the roster means "no enrolment in the current year"
+  // (Users API §5.3), not "no grade" — the same reason syncStudents refuses to
+  // overwrite a stored grade with null.
+  const gradeLevel = identity.gradeLevel ?? student.gradeLevel;
+  if (!isTrackGrade(gradeLevel))
+    return {
+      ok: false,
+      // Says which grades, and does not say which grade we think they are in:
+      // the message is shown before any session exists, to whoever typed the
+      // password.
+      error: 'ระบบวิชาเสริมเปิดให้เฉพาะนักเรียน ม.4-6 เท่านั้น',
+      status: 403,
+    };
+
+  return {
+    ok: true,
+    user: {
+      sub: `person:${student.id}`,
+      role: 'student',
+      name: identity.name || student.fullName,
+      firstName: student.firstName,
+      personId: student.id,
+      via,
+    },
+  };
+}
+
+/** Verify a SchoolOS credential, then admit whoever it turned out to be. */
 async function verifyPerson(
   type: 'teacher' | 'student',
   username: string,
@@ -71,85 +222,22 @@ async function verifyPerson(
   if (!verify.user.active)
     return { ok: false, error: 'บัญชีถูกปิดใช้งาน / พ้นสภาพแล้ว', status: 403 };
 
-  if (type === 'teacher') {
-    // Upsert a minimal person row from the verified identity, then refresh the
-    // SchoolOS role on every login (a promotion to teacher-admin applies
-    // immediately, without waiting for the next roster sync).
-    const [existing] = await db
-      .select({ id: people.id, fullName: people.fullName, firstName: people.firstName })
-      .from(people)
-      .where(and(eq(people.type, 'teacher'), eq(people.schoolosId, verify.user.id)))
-      .limit(1);
-
-    let personId: number;
-    if (existing) {
-      personId = existing.id;
-      await db
-        .update(people)
-        .set({ schoolosRole: verify.user.role, status: verify.user.status, syncedAt: new Date() })
-        .where(eq(people.id, personId));
-    } else {
-      const name = verify.user.name || username;
-      const [inserted] = await db
-        .insert(people)
-        .values({
-          type: 'teacher',
-          schoolosId: verify.user.id,
-          code: verify.user.code,
-          firstName: name,
-          lastName: '',
-          fullName: name,
-          schoolosRole: verify.user.role,
-          status: verify.user.status,
-        })
-        .returning({ id: people.id });
-      personId = inserted.id;
-    }
-
-    // Two independent ways to be an admin here: the Users Service says so, or
-    // this school added a local grant on หน้าสิทธิ์. Neither can revoke the
-    // other — the grant is additive by design.
-    const role: 'admin' | 'teacher' =
-      verify.user.role === 'teacher-admin' || (await hasAdminGrant(personId))
-        ? 'admin'
-        : 'teacher';
-    return {
-      ok: true,
-      user: {
-        sub: `person:${personId}`,
-        role,
-        name: verify.user.name || username,
-        // The synced row is the only place ชื่อจริง is split out; before the
-        // first sync the avatar falls back to stripping the คำนำหน้า itself.
-        firstName: existing?.firstName,
-        personId,
-      },
-    };
-  }
-
-  // student
-  const [student] = await db
-    .select({ id: people.id, fullName: people.fullName, firstName: people.firstName })
-    .from(people)
-    .where(and(eq(people.type, 'student'), eq(people.schoolosId, verify.user.id)))
-    .limit(1);
-  if (!student)
-    return {
-      ok: false,
-      error: 'ระบบวิชาเสริมใช้เฉพาะนักเรียน ม.4-6 ที่ซิงก์รายชื่อแล้ว — ติดต่อผู้ดูแล',
-      status: 403,
-    };
-
-  return {
-    ok: true,
-    user: {
-      sub: `person:${student.id}`,
-      role: 'student',
-      name: verify.user.name || student.fullName,
-      firstName: student.firstName,
-      personId: student.id,
-    },
+  // The role is refreshed from this payload on every login, so a promotion to
+  // teacher-admin applies immediately rather than waiting for the next sync.
+  const identity: SchoolOsIdentity = {
+    id: verify.user.id,
+    code: verify.user.code || username,
+    // Left empty rather than filled in with the username: the admit functions
+    // have better fallbacks than a login code — the synced full name — and can
+    // only use them if they can tell "no name" from "a name that is the code".
+    name: verify.user.name || '',
+    role: verify.user.role,
+    status: verify.user.status,
   };
+
+  return type === 'teacher'
+    ? admitTeacher(identity, 'password')
+    : admitStudent(identity, 'password');
 }
 
 /**
@@ -205,7 +293,13 @@ export async function resolveLogin(
     }
     return {
       ok: true,
-      user: { sub: `admin:${adminRow.id}`, role: 'admin', name: adminRow.name, adminId: adminRow.id },
+      user: {
+        sub: `admin:${adminRow.id}`,
+        role: 'admin',
+        name: adminRow.name,
+        adminId: adminRow.id,
+        via: 'password',
+      },
     };
   }
 

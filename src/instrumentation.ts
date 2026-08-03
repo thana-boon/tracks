@@ -11,7 +11,7 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { bootstrapAdmin, checkSessionConfig } = await import('./lib/bootstrap');
+    const { bootstrapAdmin, checkSessionConfig, checkSsoConfig } = await import('./lib/bootstrap');
     // Before anything else: a session signed with the example secret is not a
     // session. Warns in development; in production this is a refusal to boot,
     // and exiting is the only way to make it one — a throw here is caught and
@@ -22,6 +22,9 @@ export async function register() {
       console.error(e instanceof Error ? e.message : e);
       process.exit(1);
     }
+    // Warn-only, and after the fatal check: SSO being misconfigured is a reason
+    // to type a password, not a reason for the school to have no system.
+    checkSsoConfig();
     await bootstrapAdmin();
     const { startAutoSync } = await import('./lib/auto-sync');
     startAutoSync();

@@ -7,7 +7,10 @@ import { Menu, X, LogOut, PanelLeftClose, PanelLeft, ChevronDown } from 'lucide-
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { withBasePath } from '@/lib/base-path';
+import { logoutUrl, type SsoConfig } from '@/lib/sso-client';
 import { Avatar } from './avatar';
+import { SessionKeeper } from './session-keeper';
+import { SessionGuard } from './session-guard';
 import {
   navFor,
   roleLabel,
@@ -25,6 +28,9 @@ export function AppShell({
   firstName,
   photoUrl,
   yearLabel,
+  sso,
+  via,
+  ssoSub,
   children,
 }: {
   role: AppRole;
@@ -34,6 +40,12 @@ export function AppShell({
   /** account photo endpoint, or null for accounts without a SchoolOS person */
   photoUrl?: string | null;
   yearLabel?: string;
+  /** where SchoolOS is, for the keeper and the logout button */
+  sso: SsoConfig;
+  /** how this session started — only an SSO one has a platform session to keep */
+  via?: string;
+  /** whose SchoolOS session this one came from, for the guard to check against */
+  ssoSub?: string;
   children: React.ReactNode;
 }) {
   const nav = navFor(role);
@@ -42,6 +54,12 @@ export function AppShell({
 
   return (
     <div className="flex min-h-dvh bg-background">
+      {/* Both render nothing in the ordinary case, and both are mounted here so
+          they cover every signed-in page: the keeper for its timers, the guard
+          to catch a session that is still ours but no longer this browser's. */}
+      <SessionKeeper sso={sso} via={via} />
+      <SessionGuard sso={sso} via={via} ssoSub={ssoSub} />
+
       {/* Sidebar (desktop) */}
       <aside
         className={cn(
@@ -55,6 +73,7 @@ export function AppShell({
           firstName={firstName}
           photoUrl={photoUrl}
           nav={nav}
+          sso={sso}
           collapsed={collapsed}
           onToggle={() => setCollapsed((c) => !c)}
         />
@@ -75,6 +94,7 @@ export function AppShell({
               firstName={firstName}
               photoUrl={photoUrl}
               nav={nav}
+              sso={sso}
               collapsed={false}
               onNavigate={() => setMobileOpen(false)}
               onClose={() => setMobileOpen(false)}
@@ -214,6 +234,7 @@ function SidebarContent({
   firstName,
   photoUrl,
   nav,
+  sso,
   collapsed,
   onToggle,
   onNavigate,
@@ -224,6 +245,7 @@ function SidebarContent({
   firstName?: string;
   photoUrl?: string | null;
   nav: NavEntry[];
+  sso: SsoConfig;
   collapsed: boolean;
   onToggle?: () => void;
   onNavigate?: () => void;
@@ -233,9 +255,40 @@ function SidebarContent({
   const router = useRouter();
   /** Groups the user has opened or shut by hand; the rest follow the route. */
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  const [leaving, setLeaving] = useState(false);
 
+  /**
+   * Sign out of this system, and then out of SchoolOS.
+   *
+   * Order matters and so does the `await`. Our own cookie is cleared first,
+   * on our own origin, and we wait for it: firing that request off and changing
+   * the page in the same breath lets the browser cancel it mid-flight, and the
+   * failure is completely silent.
+   *
+   * Then a top-level navigation to the platform's logout — not a background
+   * POST, for the same reason. Signing out of here alone would not be signing
+   * out at all: the SchoolOS cookie belongs to the browser, not the tab, and
+   * the next visit to this system would be walked straight back in by SSO. On
+   * the shared machines in the staff room, that is the difference between a
+   * logout button and a decoration.
+   *
+   * Note what is deliberately NOT done here: the "recently signed out" flag is
+   * not set. That flag exists to stop SSO undoing an *idle timeout*; pressing
+   * this button is not that. Ending the SchoolOS session is what stops SSO
+   * bringing them back, and it needs no help — whereas setting the flag would
+   * lock somebody out of silent sign-in for a quarter of an hour after they had
+   * signed into SchoolOS again, which is precisely the journey this button is
+   * usually the first step of.
+   */
   async function logout() {
-    await fetch(withBasePath('/api/auth/logout'), { method: 'POST' });
+    if (leaving) return;
+    setLeaving(true);
+    await fetch(withBasePath('/api/auth/logout'), { method: 'POST' }).catch(() => null);
+
+    if (sso.enabled) {
+      window.location.assign(logoutUrl(sso));
+      return;
+    }
     toast.success('ออกจากระบบแล้ว');
     router.replace('/login');
     router.refresh();
@@ -339,7 +392,8 @@ function SidebarContent({
         <div className={cn('flex gap-2', collapsed && 'flex-col')}>
           <button
             onClick={logout}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white"
+            disabled={leaving}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-60"
             title="ออกจากระบบ"
           >
             <LogOut className="size-4.5" strokeWidth={1.7} />

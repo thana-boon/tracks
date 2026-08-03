@@ -2,6 +2,7 @@ import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { AppShell } from '@/components/app-shell';
 import { photoUrlOf, type AppRole } from '@/lib/session';
+import { ssoConfig } from '@/lib/sso';
 
 /**
  * Wraps a page in the app shell for whichever of the given roles the current
@@ -24,6 +25,9 @@ export async function RoleShell({
       firstName={user.firstName}
       photoUrl={photoUrlOf(user)}
       yearLabel={year ? `ปีการศึกษา ${year.year}` : 'ยังไม่ได้ซิงก์ปีการศึกษา'}
+      sso={ssoConfig()}
+      via={user.via}
+      ssoSub={user.ssoSub}
     >
       {children}
     </AppShell>

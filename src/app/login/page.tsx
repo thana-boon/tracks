@@ -1,12 +1,27 @@
 import { redirect } from 'next/navigation';
 import { currentUser, dashboardPath } from '@/lib/authz';
+import { ssoConfig } from '@/lib/sso';
 import { LoginForm } from './login-form';
 
 export const metadata = { title: 'เข้าสู่ระบบ' };
 
+/**
+ * Never prerendered: the SSO settings are read from the server environment at
+ * request time (that is the point of them not being build-time constants), and
+ * a cached login page would also be a cached "who is signed in" answer.
+ */
+export const dynamic = 'force-dynamic';
+
 export default async function LoginPage() {
   const user = await currentUser();
   if (user) redirect(dashboardPath(user.role));
+
+  // Handed down rather than fetched from /api/auth/sso/config: this page is
+  // rendered on the server anyway, so the browser can start asking SchoolOS for
+  // a code immediately instead of spending a round trip finding out where to
+  // ask. The endpoint still exists — it is the published contract, and the way
+  // to check a deployment's settings from outside — and both read the same env.
+  const sso = ssoConfig();
 
   return (
     <main className="grid min-h-dvh lg:grid-cols-[1.1fr_1fr]">
@@ -69,7 +84,7 @@ export default async function LoginPage() {
             กรอกชื่อผู้ใช้/รหัสประจำตัวและรหัสผ่าน ระบบจะตรวจสอบสิทธิ์ให้อัตโนมัติ
           </p>
           <div className="mt-6">
-            <LoginForm />
+            <LoginForm sso={sso} />
           </div>
         </div>
       </section>

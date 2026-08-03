@@ -13,7 +13,7 @@
 
 | ส่วน | รายละเอียด |
 |---|---|
-| Identity | ไม่มี user/login ของตัวเอง — ยืนยันตัวตนผ่าน `POST /api/public/v1/auth/verify` ของ Users Service |
+| Identity | ไม่มี user/login ของตัวเอง — ยืนยันตัวตนผ่าน `POST /api/public/v1/auth/verify` ของ Users Service · และรับช่วง session ที่ล็อกอิน SchoolOS อยู่แล้วด้วย **Silent SSO** |
 | Role | มาจาก API: ครูที่เป็น `teacher-admin` → เข้าเป็น **admin**, `teacher` → **teacher**, นักเรียน → **student** — และเพิ่มด้วย “สิทธิ์ผู้ดูแล” ในระบบนี้ได้อีกทาง |
 | ข้อมูลนักเรียน/ครู | ซิงก์ทางเดียวจาก Users Service (นักเรียนเฉพาะ ม.4-6) — อ่านอย่างเดียว, **ซิงก์อัตโนมัติ** ตามรอบ |
 | ผลการเรียน | คำนวณอัตโนมัติจากการเช็คชื่อ — ไม่ให้กรอกเกรดตรง ๆ (ดู `src/lib/evaluate.ts`) |
@@ -34,10 +34,90 @@ admin **ของระบบวิชาเสริมนี้เท่าน
 - เก็บในตาราง `admin_grants` — **ไม่เขียนกลับไปที่ SchoolOS** ไม่ว่ากรณีใด
 - สิทธิ์เป็นแบบ **บวกอย่างเดียว**: ครูที่เป็น `teacher-admin` อยู่แล้วยังเป็น admin เสมอ
   ถอนที่นี่ไม่ได้ (แสดงเป็นรายการอ่านอย่างเดียว) — และถอน grant ที่นี่ก็ไม่กระทบสิทธิ์ฝั่ง SchoolOS
-- ให้/ถอนแล้ว **มีผลทันทีในหน้าถัดไปที่เปิด** ไม่ต้องรอ session 12 ชม. หมดอายุ
+- ให้/ถอนแล้ว **มีผลทันทีในหน้าถัดไปที่เปิด** ไม่ต้องรอ session หมดอายุ
   (`src/lib/authz.ts` อ่าน role ใหม่จาก DB ทุกครั้ง ไม่เชื่อ role ที่ฝังใน JWT)
 - ถอนสิทธิ์ของตัวเองไม่ได้ — กันล็อกตัวเองออกจากหน้านี้
 - ทุกครั้งที่ให้/ถอน บันทึกลง `activity_logs` (`grant_admin` / `revoke_admin`)
+
+### Silent SSO — เข้าระบบต่อจาก SchoolOS
+
+ครูที่ล็อกอิน SchoolOS อยู่แล้วเปิดระบบนี้ → **เข้าได้เลย ไม่เห็นหน้า login**
+ถ้ายังไม่ได้ล็อกอิน → เห็นฟอร์มปกติ ไม่ค้าง ไม่ error · ดู `src/lib/sso.ts`, `src/lib/sso-client.ts`
+
+```
+เบราว์เซอร์                     server ของเรา                 SchoolOS Users
+   |-- GET /users/api/auth/handoff?audience=tracks -----------> code (60 วิ ครั้งเดียว)
+   |-- POST /tracks/api/auth/sso {code} -->
+   |                                |-- POST redeem (X-API-Key) --> ตัวตนผู้ใช้
+   |                                |-- ตรวจสิทธิ์เองอีกรอบ แล้วออก session ของเรา
+```
+
+- **`/users` เป็น path ไม่ใช่ URL** — nginx เสิร์ฟทุกระบบจากโฮสต์เดียว จึงเป็น same-origin
+  กับเรา (cookie ของ SchoolOS ถูกส่งไปเอง · ไม่ต้องตั้ง CORS) ส่วนพอร์ต `:3002`
+  (`SCHOOLOS_API_BASE_URL`) ใช้เฉพาะตอน **server คุยกับ server** เท่านั้น
+- **ตัวตนที่ได้จาก handoff เชื่อได้แค่ “คนนี้คือใคร”** — ไม่มี `active`/`status` และ role มีแค่
+  `teacher`/`student` (ไม่มี `teacher-admin`) ระบบจึง**อ่านทะเบียนซ้ำเองทุกครั้ง**
+  (`GET /teachers?q=&status=active` แล้วกรองรหัสให้ตรงเป๊ะ · `GET /students`)
+  แล้วส่งต่อเข้า `admitTeacher()` / `admitStudent()` ใน `src/lib/login.ts` — **ชุดเดียว**
+  กับที่ล็อกอินด้วยรหัสผ่านใช้ ครูที่ลาออก/นักเรียนที่จบแล้วจึงเข้าไม่ได้ทั้งสองทาง
+- **API key อยู่ฝั่ง server เท่านั้น** · `code` เป็น credential ชั่วคราว — ไม่เก็บลง storage
+  ไม่ใส่ใน URL ไม่ log
+- **ยิงโค้ดเดิมซ้ำไม่ได้** (`used_code` = บั๊กฝั่งเรา, log ระดับ error, ไม่ retry — ขอโค้ดใหม่เสมอ)
+- แยก error ชัด: โค้ดหมดอายุ → 401 (ถอยไปแสดงฟอร์มเงียบ ๆ) · ปัญหาที่ key → 503 (แจ้งผู้ดูแล) ·
+  คนที่ถูกถอดสิทธิ์ → 403 (บอกเหตุผล) · rate limiter **คนละถัง**กับ `/api/auth/login`
+- ตอน `npm run dev` เป็นคนละ origin กับ Users จริง → SSO ไม่ทำงาน แล้วตกไปที่ฟอร์มปกติ
+  **ไม่ใช่ของพัง**
+
+**ต้องขอจากผู้ดูแล SchoolOS ก่อน:** API key ของระบบนี้ต้องมี scope `auth:handoff`
+และตั้งช่อง “ระบบปลายทาง (audience)” = `tracks` — ตรวจเองได้ด้วย
+
+```bash
+curl -H "X-API-Key: <key>" http://192.168.200.56:3002/api/public/v1/me
+# ต้องเห็น auth:handoff ใน scopes และ "handoffAudience": "tracks"
+```
+
+ถ้าตั้งไม่ครบ ระบบ **เตือนตอนสตาร์ท แต่ไม่ล้ม** — SSO ปิดไปเฉย ๆ ทุกคนยังล็อกอินด้วยรหัสผ่านได้
+
+### นโยบาย session
+
+| อะไร | ค่า | ทำไม |
+|---|---|---|
+| Idle timeout | `JWT_EXPIRES_IN=15m` | ต้อง **ไม่เกิน** `SESSION_IDLE_MINUTES` ของ SchoolOS (15) ไม่งั้นจะ “ยังอยู่ในระบบเรา แต่ SchoolOS ตายไปแล้ว” — แอปเตือนตอนสตาร์ทถ้าตั้งเกิน |
+| เพดานต่อการล็อกอิน | `SESSION_MAX_HOURS=8` | เท่ากับ `SESSION_ABSOLUTE_HOURS` ของแพลตฟอร์ม |
+| ต่ออายุ | อัตโนมัติ **เมื่อมีการขยับจริง** | `src/components/session-keeper.tsx` |
+| คนที่ SchoolOS เปลี่ยน | สลับ/เตะออกให้อัตโนมัติ | `src/components/session-guard.tsx` — ดูหัวข้อล่าง |
+| ออกจากระบบ | ออกจาก SchoolOS ด้วย | ไม่งั้น SSO พากลับเข้ามาเอง = ล็อกเอาต์ไม่ได้จริงบนเครื่องส่วนกลาง |
+| session จบ | ส่งไปหน้าแรก SchoolOS | ไม่ค้างอยู่หน้า login ของเรา |
+
+15 นาทีนี้คือ “เครื่องที่ไม่มีใครแตะ” ไม่ใช่ “ถูกเตะออกทุก 15 นาที” — ระหว่างที่ทำงานอยู่จริง
+`SessionKeeper` ต่ออายุให้ทั้ง session ของเราและของ SchoolOS โดยนับเฉพาะ
+`mousedown` / `keydown` / `touchstart` / `scroll` / `focus` — **ไม่นับ `mousemove`**
+(เมาส์สะเทือนบนโต๊ะไม่ใช่การทำงาน) แท็บที่เปิดค้างไว้เฉย ๆ จึงหลุดตามกำหนดจริง
+
+> **หลังหมดเวลาแล้ว SSO จะไม่ดึงกลับทันที** — ถูกพักไว้ 1 ช่วง idle (15 นาที)
+> โดยจำ *เวลา* ที่โดนเตะไว้ ไม่ใช่ธงเปล่า ๆ ไม่งั้นเครื่องที่เคยหมดเวลาสักครั้ง
+> จะไม่ได้ SSO อีกเลยข้ามวัน (อาการที่เห็นคือ “บางเครื่องเข้าเอง บางเครื่องไม่เข้า”)
+> · **เปิดหน้า `/login` ตรง ๆ ได้เสมอ** เพราะ admin ท้องถิ่นคือทางเข้าสำรองตอน SchoolOS ล่ม
+
+#### session ของเราต้องเป็น “คนเดียวกับที่เบราว์เซอร์ล็อกอิน SchoolOS อยู่” เสมอ
+
+cookie ของเราถูกออกครั้งเดียวตอน handoff แล้วเชื่อไปจนหมดอายุ — ซึ่งพังในเคสนี้:
+**ออกจาก portal → ล็อกอินเป็นอีกคน → กลับมาที่ระบบนี้** cookie เดิมยัง valid อยู่
+ระบบจึงเสิร์ฟหน้าของ *คนแรก* ให้ *คนที่สอง* (บนเครื่องส่วนกลาง = เห็นคะแนน/เวลาเรียนของคนอื่น)
+
+`SessionGuard` ปิดช่องนี้ด้วยสิ่งเดียวที่ cookie ทำเองไม่ได้ — **ถามสด**:
+
+- session ของเราเก็บ `ssoSub` (= `sub` ของ SchoolOS ซึ่งคือรหัสครู/นักเรียน) ไว้ตั้งแต่ตอน handoff
+  เพราะ `sub` ของเราคือ `person:<id>` ในฐานข้อมูลเรา เทียบกับฝั่ง SchoolOS ไม่ได้เลย
+- ทุกครั้งที่โหลดหน้า · กลับมาที่แท็บ · และทุก 1 นาทีระหว่างเปิดอยู่ → ยิง
+  `GET /users/api/auth/session` (cookie-based ไม่ใช้ API key และ **ไม่**ต่ออายุ idle ของ
+  SchoolOS จึงถามถี่ได้)
+- **คนละคน** → แลก handoff ใหม่เงียบ ๆ แล้วโหลดหน้าใหม่ตามสิทธิ์ของคนใหม่ (ครั้งเดียว มี
+  กันลูปด้วย `sessionStorage`) · **ไม่มีใครล็อกอิน SchoolOS แล้ว** → ล้าง session แล้วกลับหน้า login
+- **ถามไม่สำเร็จ (เน็ตล่ม / CORS / service ตาย) → ไม่ทำอะไรเลย** — “ไม่ได้คำตอบ” ไม่เท่ากับ
+  “ไม่มีใครล็อกอิน” ถ้าเหมารวมกัน เน็ตกระตุกทีเดียวเตะทั้งโรงเรียนออก
+- session ที่มาจาก **รหัสผ่าน** (`via: 'password'` เช่น admin ท้องถิ่น) ได้รับการยกเว้น —
+  ไม่มี session ฝั่งแพลตฟอร์มให้เทียบตั้งแต่แรก
 
 ### ซิงก์อัตโนมัติ
 
@@ -112,8 +192,14 @@ docker compose up -d --build
 | `DATABASE_URL_INTERNAL` | ต่อ `postgres-core` ผ่าน school-net (ใช้ในคอนเทนเนอร์) |
 | `DATABASE_URL` | ต่อผ่าน localhost:5432 (ใช้ตอน `npm run dev` / migrate นอก docker) |
 | `JWT_SECRET` | ลายเซ็น session ของแอปนี้ (ไม่เกี่ยวกับ SchoolOS) |
-| `SCHOOLOS_API_BASE_URL` | เช่น `http://192.168.200.56:3002` หรือ `http://postgres-core-net-host:3002` |
-| `SCHOOLOS_API_KEY` | API key `sk_live_...` — scope ที่ต้องมี: `students:read`, `teachers:read`, `auth:students`, `auth:teachers` (และ `years:read` ถ้ามี) |
+| `JWT_EXPIRES_IN` | idle timeout — **ห้ามเกิน 15m** (เท่ากับ SchoolOS) ไม่ใส่ = `15m` |
+| `SESSION_MAX_HOURS` | เพดานต่อการล็อกอินหนึ่งครั้ง ไม่ใส่ = `8` |
+| `SCHOOLOS_API_BASE_URL` | ที่อยู่ SchoolOS **ในสายตา server ของเรา** เช่น `http://192.168.200.56:3002` — ใช้กับ X-API-Key เท่านั้น ห้ามเอาไปใส่ใน URL ที่เบราว์เซอร์ต้องเรียก |
+| `SCHOOLOS_API_KEY` | API key `sk_live_...` — scope ที่ต้องมี: `students:read`, `teachers:read`, `auth:students`, `auth:teachers`, `auth:handoff` (และ `years:read` ถ้ามี) |
+| `SCHOOLOS_USERS_WEB_BASE` | ที่อยู่ Users **ในสายตาเบราว์เซอร์** — เป็น path (`/users`) ไม่ใช่ URL |
+| `SCHOOLOS_SSO_AUDIENCE` | ต้องตรงกับ `handoffAudience` ของ API key ใบนี้ (`tracks`) — ไม่ใส่ = ปิด SSO |
+| `SCHOOLOS_PORTAL_URL` | หน้าแรก SchoolOS ที่จะพาไปเมื่อ session จบ (`/`) |
+| `SSO_ENABLED` | ใส่ `false` เพื่อปิด silent SSO และใช้ฟอร์มรหัสผ่านอย่างเดียว |
 | `AUTO_SYNC_INTERVAL_MINUTES` | นาทีต่อรอบซิงก์อัตโนมัติ (ไม่ใส่ = 360, ขั้นต่ำ 5, `0` = ปิด) |
 | `BACKUP_DIR` | ที่เก็บไฟล์ pg_dump (docker: volume `tracks_backups`) |
 | `SEED_ADMIN_*` | admin แรกตอนบูตครั้งแรก |
@@ -139,7 +225,7 @@ src/
     teacher/                dashboard ของครู
     student/                วิชาเสริมของฉัน
     api/
-      auth/                 login / logout
+      auth/                 login / logout / sso / sso/config / renew
       attendance-sheet/     ใบเช็คชื่อ PDF
       transcript/           ทรานสคริปต์ PDF (1 หน้า A4/คน, รวมทุกปีการศึกษา)
       homeroom-report/      รายงานห้องที่ปรึกษา PDF (เลือกได้หลายห้อง)
@@ -148,7 +234,10 @@ src/
     evaluate.ts             ★ ตรรกะประเมินผล (pure, มี test)
     attendance-summary.ts   ★ นับเวลาเข้าเรียนรายคน (pure, มี test)
     schoolos.ts             client ของ Users Service API
-    login.ts                resolve ตัวตน + role
+    login.ts                resolve ตัวตน + role (admitTeacher/admitStudent ใช้ร่วมกับ SSO)
+    sso.ts                  แลกโค้ด handoff → ตรวจทะเบียนซ้ำ → session ของเรา (server)
+    sso-client.ts           ขอโค้ด / ถามว่าตอนนี้ใครล็อกอินอยู่ / ธง “เพิ่งถูกเตะออก” / logout ข้ามระบบ (browser)
+    session-core.ts         เซ็น/ตรวจ JWT + นโยบายอายุ session (middleware ใช้ได้)
     admin-grants.ts         สิทธิ์ผู้ดูแลเฉพาะระบบนี้ + resolve role ปัจจุบัน
     sync.ts                 ซิงก์ years/students/teachers/homerooms
     auto-sync.ts            ตัวจับเวลา + สถานะการซิงก์อัตโนมัติ

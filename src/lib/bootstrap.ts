@@ -2,6 +2,8 @@ import { count } from 'drizzle-orm';
 import { db } from '../db';
 import { admins } from '../db/schema';
 import { hashPassword } from './password';
+import { schoolos } from './schoolos';
+import { PLATFORM_IDLE_SECONDS, sessionTtlSeconds } from './session-core';
 
 /**
  * First-run admin bootstrap. Runs in-process at server startup
@@ -48,6 +50,64 @@ export function checkSessionConfig(): void {
       '[config] COOKIE_SECURE=false — the session cookie will travel in clear text. ' +
         'Correct for a plain-HTTP LAN deployment; behind the school HTTPS nginx set it to true.',
     );
+
+  // Our idle window may never outlast the platform's. If it does, this app goes
+  // on believing in a session SchoolOS has already forgotten: renewing it
+  // upstream fails, silent re-entry fails, and the user is "signed in" to
+  // something that cannot prove who they are.
+  const idle = sessionTtlSeconds();
+  if (idle > PLATFORM_IDLE_SECONDS)
+    console.warn(
+      `[config] JWT_EXPIRES_IN is ${Math.round(idle / 60)} minutes, longer than the SchoolOS idle ` +
+        `window of ${PLATFORM_IDLE_SECONDS / 60} minutes. A session here would outlive the one it ` +
+        'came from — set it to 15m or less.',
+    );
+}
+
+/**
+ * Silent SSO's own settings. Every one of these is a warning and never a
+ * refusal: a system that cannot hand sessions over is a system where people
+ * type their passwords, which is exactly how it worked before. Refusing to boot
+ * over it would turn a degraded feature into an outage.
+ */
+export function checkSsoConfig(): void {
+  const audience = (process.env.SCHOOLOS_SSO_AUDIENCE ?? '').trim();
+  if (process.env.SSO_ENABLED === 'false') {
+    console.log('[sso] disabled by SSO_ENABLED=false — password login only.');
+    return;
+  }
+  if (!audience) {
+    console.warn(
+      '[sso] SCHOOLOS_SSO_AUDIENCE is not set — silent sign-in is off. Set it to the ' +
+        '"ระบบปลายทาง (audience)" on this system\'s API key (tracks), then restart.',
+    );
+    return;
+  }
+  if (!process.env.SCHOOLOS_API_KEY) {
+    console.warn('[sso] SCHOOLOS_API_KEY is not set — handoff codes cannot be redeemed.');
+    return;
+  }
+
+  // Ask the Users Service whether the key is actually set up, rather than
+  // waiting for the first teacher of the morning to find out. Best-effort and
+  // out of band: the platform may simply be slower to start than we are.
+  void (async () => {
+    try {
+      const me = (await schoolos.me()) as { scopes?: string[]; handoffAudience?: string | null };
+      if (!me.scopes?.includes('auth:handoff'))
+        console.warn(
+          '[sso] this API key has no `auth:handoff` scope — ask the SchoolOS admin to add it.',
+        );
+      else if (me.handoffAudience !== audience)
+        console.warn(
+          `[sso] the API key is bound to audience ${JSON.stringify(me.handoffAudience)} but this ` +
+            `app asks for ${JSON.stringify(audience)} — codes will fail with audience_mismatch.`,
+        );
+      else console.log(`[sso] ready — audience "${audience}".`);
+    } catch (e) {
+      console.warn('[sso] could not verify the API key at startup:', e instanceof Error ? e.message : e);
+    }
+  })();
 }
 
 export async function bootstrapAdmin(): Promise<void> {

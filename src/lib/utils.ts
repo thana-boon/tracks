@@ -44,6 +44,19 @@ export function sortGrades(grades: (string | null)[]): string[] {
 export const TRACK_GRADES = ['ม.4', 'ม.5', 'ม.6'];
 
 /**
+ * Is this grade one this system serves?
+ *
+ * Parsed rather than compared against TRACK_GRADES as strings: the label
+ * reaches us from the Users Service, a sync, and a URL, and "ม4" / "ม. 4" all
+ * mean ม.4. A membership test on the exact string would let a login through or
+ * refuse one on a missing full stop, which is not a decision anyone intended.
+ */
+export function isTrackGrade(grade: string | null | undefined): boolean {
+  const key = gradeKey(grade ?? null);
+  return TRACK_GRADES.some((g) => gradeKey(g) === key);
+}
+
+/**
  * Dates are entered and read back as local school time, so every conversion
  * pins Asia/Bangkok explicitly rather than trusting the server's clock —
  * containers run in UTC and would otherwise shift a class date by seven hours.
