@@ -63,7 +63,11 @@ test('the expiry hint cookie is readable, and otherwise identical to the token c
   const hint = expCookieOptions();
   assert.equal(session.httpOnly, true, 'the token is never readable');
   assert.equal(hint.httpOnly, false, 'the hint always is');
-  assert.equal(hint.maxAge, session.maxAge, 'they must die together');
+  assert.deepEqual(
+    { ...hint, httpOnly: session.httpOnly },
+    session,
+    'httpOnly is the only difference — they must die together, in every sense',
+  );
   assert.equal(hint.secure, session.secure);
   assert.equal(hint.sameSite, session.sameSite);
   assert.equal(hint.path, session.path);
@@ -108,9 +112,24 @@ test('identityOf keeps the identity and drops the clocks', async () => {
   assert.equal(identity.personId, 1);
 });
 
-test('the cookie outlives the token by exactly nothing', () => {
+/**
+ * The bug this pins: our cookie used to carry a Max-Age, so it survived the
+ * browser closing while the SchoolOS cookie it depends on did not. Sign in,
+ * close everything, and the next person at that machine was walked into the
+ * previous person's account — the login page saw a valid session and sent them
+ * straight to its dashboard.
+ */
+test('the session cookies die with the browser', () => {
   process.env.JWT_EXPIRES_IN = '3h';
-  assert.equal(sessionCookieOptions().maxAge, sessionTtlSeconds());
+  for (const [what, opts] of [
+    ['token', sessionCookieOptions()],
+    ['expiry hint', expCookieOptions()],
+  ] as const) {
+    assert.ok(!('maxAge' in opts), `${what}: no Max-Age, or it outlives the browser`);
+    assert.ok(!('expires' in opts), `${what}: no Expires, for the same reason`);
+  }
+  // And the lifetime still exists — it just lives in the token alone now.
+  assert.equal(sessionTtlSeconds(), 3 * 3600);
   delete process.env.JWT_EXPIRES_IN;
 });
 

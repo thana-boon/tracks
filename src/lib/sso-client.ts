@@ -203,8 +203,15 @@ export async function exchangeCode(code: string): Promise<SsoAttempt> {
  * and silent SSO will walk the next person straight back into their account. On
  * the shared machines this school actually has, that is the whole ballgame.
  */
-export function logoutUrl(cfg: SsoConfig): string {
-  return `${cfg.usersBase}/api/auth/logout?next=${encodeURIComponent(cfg.portalUrl)}`;
+/**
+ * `next` defaults to the portal, which is where signing out belongs — signing
+ * out of SchoolOS signs you out of everything, so its front door is the honest
+ * place to land. The exception is somebody swapping accounts *here*: they are
+ * about to type into our own login form, and sending them to the portal first
+ * only makes them find their way back.
+ */
+export function logoutUrl(cfg: SsoConfig, next: string = cfg.portalUrl): string {
+  return `${cfg.usersBase}/api/auth/logout?next=${encodeURIComponent(next)}`;
 }
 
 /**

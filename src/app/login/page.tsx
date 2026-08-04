@@ -1,7 +1,9 @@
-import { redirect } from 'next/navigation';
 import { currentUser, dashboardPath } from '@/lib/authz';
+import { photoUrlOf } from '@/lib/session';
+import { roleLabel } from '@/components/nav-config';
 import { ssoConfig } from '@/lib/sso';
 import { LoginForm } from './login-form';
+import { SignedInNotice } from './signed-in-notice';
 
 export const metadata = { title: 'เข้าสู่ระบบ' };
 
@@ -12,9 +14,22 @@ export const metadata = { title: 'เข้าสู่ระบบ' };
  */
 export const dynamic = 'force-dynamic';
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  /**
+   * Somebody may already be signed in on this browser — and on a shared machine
+   * that somebody is not necessarily the person now looking at the screen.
+   *
+   * This used to redirect straight into whatever session it found, which made
+   * the login page unreachable for the second person at the same computer: they
+   * asked to sign in and were shown the first person's dashboard instead, with
+   * no form anywhere to correct it. It now says whose session it is and lets
+   * them either keep it or throw it away (SignedInNotice).
+   */
   const user = await currentUser();
-  if (user) redirect(dashboardPath(user.role));
 
   // Handed down rather than fetched from /api/auth/sso/config: this page is
   // rendered on the server anyway, so the browser can start asking SchoolOS for
@@ -22,6 +37,11 @@ export default async function LoginPage() {
   // ask. The endpoint still exists — it is the published contract, and the way
   // to check a deployment's settings from outside — and both read the same env.
   const sso = ssoConfig();
+
+  // Only a path inside this app is a legal destination — "//evil.example" also
+  // starts with "/" and would send them off-site (same rule as the form's).
+  const raw = (await searchParams).next;
+  const next = typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//') ? raw : null;
 
   return (
     <main className="grid min-h-dvh lg:grid-cols-[1.1fr_1fr]">
@@ -81,10 +101,23 @@ export default async function LoginPage() {
           </div>
           <h2 className="text-2xl font-semibold tracking-tight">เข้าสู่ระบบ</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            กรอกชื่อผู้ใช้/รหัสประจำตัวและรหัสผ่าน ระบบจะตรวจสอบสิทธิ์ให้อัตโนมัติ
+            {user
+              ? 'มีบัญชีที่เข้าสู่ระบบค้างอยู่บนเบราว์เซอร์นี้'
+              : 'กรอกชื่อผู้ใช้/รหัสประจำตัวและรหัสผ่าน ระบบจะตรวจสอบสิทธิ์ให้อัตโนมัติ'}
           </p>
           <div className="mt-6">
-            <LoginForm sso={sso} />
+            {user ? (
+              <SignedInNotice
+                name={user.name}
+                firstName={user.firstName}
+                roleLabel={roleLabel[user.role]}
+                photoUrl={photoUrlOf(user)}
+                continueTo={next ?? dashboardPath(user.role)}
+                sso={sso}
+              />
+            ) : (
+              <LoginForm sso={sso} />
+            )}
           </div>
         </div>
       </section>

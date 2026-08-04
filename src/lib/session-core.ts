@@ -84,9 +84,11 @@ export const PLATFORM_IDLE_SECONDS = 15 * 60;
 /**
  * How long a token lives with no activity — the idle timeout.
  *
- * Also the cookie's Max-Age: the two used to be set independently (12h
- * hard-coded in the cookie, JWT_EXPIRES_IN in the token), so changing the env
- * var moved one clock and not the other, and whichever ran out first decided.
+ * The only clock there is. It used to be spelled twice — once here and once as
+ * the cookie's Max-Age — so changing the env var moved one and not the other,
+ * and whichever ran out first decided. The cookie now carries no lifetime at
+ * all (see sessionCookieOptions), leaving exactly one answer to "when does this
+ * session end", checked by verifySession on every request.
  *
  * Defaults to the platform's own idle window rather than a value of our own:
  * a deployment that never sets it is then correct by default instead of
@@ -198,7 +200,28 @@ export function shouldRenew(claims: SessionClaims): boolean {
   return now - claims.iat >= sessionTtlSeconds() / 2;
 }
 
-/** The cookie attributes, in one place so route/middleware cannot disagree. */
+/**
+ * The cookie attributes, in one place so route/middleware cannot disagree.
+ *
+ * Note what is NOT here: no `maxAge`, no `expires`. That makes both of ours
+ * *session cookies* in the browser's sense — closing the browser deletes them,
+ * so on a shared staffroom machine "I closed the window" really does mean
+ * signed out, with no window in which the next person to open it inherits the
+ * last one's account. That window is not hypothetical: it is how a student
+ * signing in here met the previous student's timetable instead of the login
+ * form, because our cookie outlived the browser by a quarter of an hour.
+ *
+ * It is also what the Users Service already does (users/src/lib/jwt.ts), and
+ * the two must not disagree: SchoolOS's `sso_session` dies with the browser, so
+ * a Track cookie that survives it is a session with nothing left standing
+ * behind it — signed in here, signed out of the platform we take our word from.
+ *
+ * This costs nothing in enforcement. The idle window and the absolute cap live
+ * in the token's own claims and are re-checked by verifySession() on every
+ * request, so they hold whatever the browser chooses to keep — a cookie that
+ * outlives its token buys the holder nothing but a redirect to the login page.
+ * The old Max-Age was only ever tidiness.
+ */
 export function sessionCookieOptions() {
   return {
     httpOnly: true,
@@ -206,14 +229,14 @@ export function sessionCookieOptions() {
     // Secure unless explicitly turned off for a plain-HTTP LAN deployment.
     secure: process.env.COOKIE_SECURE !== 'false',
     path: '/',
-    maxAge: sessionTtlSeconds(),
   };
 }
 
 /**
- * The expiry-hint cookie. Same lifetime and same Secure rule as the token it
- * describes, but `httpOnly: false` — being readable from JavaScript is the
- * entire point of it (see SESSION_EXP_COOKIE).
+ * The expiry-hint cookie. Same attributes as the token it describes — it must
+ * die at the same moment, and it dies with the browser too — but
+ * `httpOnly: false`: being readable from JavaScript is the entire point of it
+ * (see SESSION_EXP_COOKIE).
  */
 export function expCookieOptions() {
   return { ...sessionCookieOptions(), httpOnly: false };
