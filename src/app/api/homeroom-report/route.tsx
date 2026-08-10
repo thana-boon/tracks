@@ -16,13 +16,21 @@ const MAX_STUDENTS = 600;
 /**
  * GET /api/homeroom-report?rooms=ม.5/1,ม.5/2[&month=2026-07] — one landscape
  * page per ห้อง: students down the side, class dates across the top. `month`
- * keeps a long year down to columns that fit. Admin only; teachers read their
- * own rooms on screen instead.
+ * keeps a long year down to columns that fit.
+ *
+ * An admin may export any ห้อง; a ครูประจำชั้น may export the ones they advise
+ * and nothing else. That limit is enforced here rather than in the page: the URL
+ * is just a query string, and the export panel that builds it is only the polite
+ * way in.
  */
 export async function GET(req: NextRequest) {
   const user = await currentUser();
-  if (!user || user.role !== 'admin')
+  if (!user || (user.role !== 'admin' && user.role !== 'teacher'))
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+
+  const isAdmin = user.role === 'admin';
+  if (!isAdmin && !user.personId)
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const year = await activeYear();
   if (!year) return NextResponse.json({ error: 'no active year' }, { status: 400 });
@@ -33,9 +41,13 @@ export async function GET(req: NextRequest) {
     .filter(Boolean);
   if (asked.length === 0) return NextResponse.json({ error: 'no rooms' }, { status: 400 });
 
-  // Only rooms that actually exist this year — the key comes from a query string.
+  // Only rooms that actually exist this year *and* that this reader may see —
+  // the key comes from a query string, and for a ครู the list is already narrowed
+  // to their own, so another teacher's room simply falls out of the filter.
   const wanted = new Set(asked);
-  const rooms = (await listHomerooms(year)).filter((r) => wanted.has(r.key));
+  const rooms = (await listHomerooms(year, isAdmin ? undefined : user.personId!)).filter((r) =>
+    wanted.has(r.key),
+  );
   if (rooms.length === 0) return NextResponse.json({ error: 'unknown rooms' }, { status: 404 });
 
   const byRoom = await studentsByRoom(rooms);

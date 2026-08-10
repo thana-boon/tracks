@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { GraduationCap } from 'lucide-react';
+import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { listSections, evaluateAll } from '@/lib/data';
 import { NeedYear, Card, CardHeader, Badge, EmptyState, resultTone } from '@/components/ui';
@@ -9,14 +10,18 @@ import { OVERALL_LABEL, PASS_MIN_RATIO } from '@/lib/evaluate';
 export const metadata = { title: 'ผลรายวิชา' };
 
 /**
- * ผลรายวิชา — the same attendance read one รอบเรียน at a time, for whoever
- * teaches the วิชา. The ห้อง-first view a ครูประจำชั้น wants is at /results.
+ * ผลรายวิชา — the same attendance read one รอบเรียน at a time, across every
+ * รอบเรียน in the school. Admin only: the switcher lists every กลุ่มเรียน there
+ * is, which is a school-wide read rather than a teacher's own. What a ครู needs
+ * — their own ห้อง, every วิชาเสริม its students sit — is at /results, and the
+ * layout keeps letting them in there.
  */
 export default async function SubjectResultsPage({
   searchParams,
 }: {
   searchParams: Promise<{ section?: string }>;
 }) {
+  await requireRole('admin');
   const year = await activeYear();
   if (!year) return <NeedYear />;
 

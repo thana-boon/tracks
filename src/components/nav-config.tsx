@@ -120,7 +120,6 @@ export function navFor(role: AppRole): NavEntry[] {
       { href: '/teacher', label: 'ภาพรวม', icon: <LayoutDashboard className="size-5" strokeWidth={sw} /> },
       { href: '/attendance', label: 'เช็คชื่อ', icon: <ClipboardCheck className="size-5" strokeWidth={sw} /> },
       { href: '/results', label: 'เวลาเข้าเรียน', icon: <CalendarCheck className="size-5" strokeWidth={sw} /> },
-      { href: '/results/subject', label: 'ผลรายวิชา', icon: <GraduationCap className="size-5" strokeWidth={sw} /> },
       { href: '/homeroom', label: 'ห้องที่ปรึกษา', icon: <Users className="size-5" strokeWidth={sw} /> },
     ];
   }

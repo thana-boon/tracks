@@ -10,10 +10,13 @@ import { ExportPanel } from './export-panel';
 export const metadata = { title: 'ออกรายงาน PDF' };
 
 /**
- * The PDF export, on its own page. Admin only — a ครูประจำชั้น reads their room
- * on screen; the batch export is a school-wide job.
+ * The PDF export, on its own page.
  *
- * `?room=` pre-ticks the room the admin came from, which is the common case:
+ * An admin exports across the school; a ครูประจำชั้น exports the ห้อง they
+ * advise — same page, same panel, a room list narrowed to their own. The API
+ * route enforces that narrowing again, since a URL can be typed.
+ *
+ * `?room=` pre-ticks the room the reader came from, which is the common case:
  * look at a ห้อง, press PDF, print that ห้อง.
  */
 export default async function HomeroomReportPage({
@@ -21,16 +24,26 @@ export default async function HomeroomReportPage({
 }: {
   searchParams: Promise<{ room?: string }>;
 }) {
-  await requireRole('admin');
+  const user = await requireRole('admin', 'teacher');
   const year = await activeYear();
   if (!year) return <NeedYear />;
 
-  const [rooms, classDays] = await Promise.all([listHomerooms(year), classDaysOfYear(year)]);
+  const isAdmin = user.role === 'admin';
+  if (!isAdmin && !user.personId)
+    return <EmptyState title="ไม่พบข้อมูลครู" hint="ต้องซิงก์รายชื่อครูก่อน — ติดต่อผู้ดูแล" />;
+
+  const [rooms, classDays] = await Promise.all([
+    listHomerooms(year, isAdmin ? undefined : user.personId!),
+    classDaysOfYear(year),
+  ]);
   const months = [...new Set(classDays.map((d) => d.date.slice(0, 7)))];
 
   const sp = await searchParams;
-  const asked = sp.room?.trim();
-  const initial = rooms.find((r) => r.key === asked)?.key ?? null;
+  const asked = rooms.find((r) => r.key === sp.room?.trim())?.key;
+  // A ครู who arrives without ?room= gets every room they advise already ticked —
+  // there is nothing else they could have meant. An admin starts from a blank
+  // sheet; ticking the whole school for them would be the wrong default.
+  const initial = asked ? [asked] : isAdmin ? [] : rooms.map((r) => r.key);
 
   return (
     <div className="space-y-6">
@@ -44,15 +57,16 @@ export default async function HomeroomReportPage({
         </Link>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight">ออกรายงาน PDF</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          รายงานเวลาเข้าเรียนวิชาเสริมรายห้อง · ปีการศึกษา {year.year} — เลือกห้องได้หลายห้องในไฟล์เดียว
+          รายงานเวลาเข้าเรียนวิชาเสริมรายห้อง · ปีการศึกษา {year.year} —{' '}
+          {isAdmin ? 'เลือกห้องได้หลายห้องในไฟล์เดียว' : 'ออกได้เฉพาะห้องที่คุณเป็นครูที่ปรึกษา'}
         </p>
       </div>
 
       {rooms.length === 0 ? (
         <EmptyState
           icon={<Users className="size-8" strokeWidth={1.5} />}
-          title="ยังไม่มีห้องที่ปรึกษาในปีนี้"
-          hint="ห้องมาจากการซิงก์ครูที่ปรึกษา — ระบบซิงก์ให้อัตโนมัติ ดูสถานะได้ที่หน้าซิงก์รายชื่อ"
+          title={isAdmin ? 'ยังไม่มีห้องที่ปรึกษาในปีนี้' : 'คุณยังไม่ได้เป็นครูที่ปรึกษาห้องใด'}
+          hint="ห้องมาจากการซิงก์ครูที่ปรึกษา — ระบบซิงก์ให้อัตโนมัติ หากคิดว่าผิดพลาด ติดต่อผู้ดูแล"
         />
       ) : (
         <ExportPanel

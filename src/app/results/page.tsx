@@ -159,11 +159,15 @@ export default async function AttendanceTimePage({
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        นับจากการเช็คชื่อจริง — วันที่ครูยังไม่ได้เช็คขึ้นเป็น “รอเช็ค” ไม่นับเป็นการขาด ·
-        ต้องการดูเป็นรายวิชา/รอบเรียน ไปที่{' '}
-        <Link href="/results/subject" className="font-medium text-primary hover:underline">
-          ผลรายวิชา
-        </Link>
+        นับจากการเช็คชื่อจริง — วันที่ครูยังไม่ได้เช็คขึ้นเป็น “รอเช็ค” ไม่นับเป็นการขาด
+        {isAdmin ? (
+          <>
+            {' · ต้องการดูเป็นรายวิชา/รอบเรียน ไปที่ '}
+            <Link href="/results/subject" className="font-medium text-primary hover:underline">
+              ผลรายวิชา
+            </Link>
+          </>
+        ) : null}
       </p>
     </div>
   );

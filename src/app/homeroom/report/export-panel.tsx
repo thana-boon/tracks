@@ -35,10 +35,10 @@ export function ExportPanel({
   rooms: ExportRoom[];
   /** "YYYY-MM" of every month that has class days, ascending */
   months: string[];
-  /** room to arrive pre-ticked — the one the reader came from */
-  initial: string | null;
+  /** rooms to arrive pre-ticked — the one the reader came from, or their own */
+  initial: string[];
 }) {
-  const [picked, setPicked] = useState<string[]>(initial ? [initial] : []);
+  const [picked, setPicked] = useState<string[]>(initial);
   const [month, setMonth] = useState(months[months.length - 1] ?? 'all');
 
   const chosen = new Set(picked);

@@ -157,14 +157,12 @@ function Header({ isAdmin, viewing }: { isAdmin: boolean; viewing?: string | nul
             เวลาเข้าเรียน
           </Button>
         </Link>
-        {isAdmin ? (
-          <Link href={viewing ? `/homeroom/report?room=${encodeURIComponent(viewing)}` : '/homeroom/report'}>
-            <Button>
-              <FileDown className="size-4.5" strokeWidth={1.8} />
-              ออกรายงาน PDF
-            </Button>
-          </Link>
-        ) : null}
+        <Link href={viewing ? `/homeroom/report?room=${encodeURIComponent(viewing)}` : '/homeroom/report'}>
+          <Button>
+            <FileDown className="size-4.5" strokeWidth={1.8} />
+            ออกรายงาน PDF
+          </Button>
+        </Link>
       </div>
     </div>
   );
