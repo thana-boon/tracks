@@ -167,17 +167,23 @@ export function DialogBody({
  *
  * `onClose` of undefined makes the dialog non-dismissable — used while a draw
  * is running, so nothing is closed mid-write.
+ *
+ * `closeOnBackdrop={false}` keeps the click outside from closing it while Esc
+ * and the ✕ still do — for a long form such as the กลุ่มเรียน editor, where a
+ * misplaced click would throw away a calendar and a roster of forty ticks.
  */
 export function Modal({
   children,
   footer,
   onClose,
+  closeOnBackdrop = true,
   labelledBy,
   className,
 }: {
   children: React.ReactNode;
   footer?: React.ReactNode;
   onClose?: () => void;
+  closeOnBackdrop?: boolean;
   labelledBy?: string;
   className?: string;
 }) {
@@ -228,7 +234,7 @@ export function Modal({
     <div className="fixed inset-0 z-[100] grid place-items-center p-4" role="presentation">
       <div
         className="anim-dialog-fade absolute inset-0 bg-[#1a1625]/45 backdrop-blur-[2px]"
-        onClick={onClose}
+        onClick={closeOnBackdrop ? onClose : undefined}
       />
       <div
         ref={panel}

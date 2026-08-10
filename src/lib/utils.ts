@@ -40,10 +40,20 @@ export function sortGrades(grades: (string | null)[]): string[] {
   );
 }
 
-/** gradeKey of the ชั้น named anywhere in a label; 999 when there is none. */
-function gradeInLabel(label: string): number {
+/**
+ * The ชั้น named anywhere in a รอบเรียน label — "ม.4 กลุ่มเรียนที่ 1" → "ม.4",
+ * "รอบบ่าย ม.5" → "ม.5" — or null for a label that names none, such as a รอบ
+ * named after its date. Both the ชั้น ordering and the ชั้น filter on
+ * จัดนักเรียนเข้าวิชา read the label the same way, so they read it here.
+ */
+export function gradeInLabel(label: string): string | null {
   const m = /(?:^|[\s([-])([อปม])\.?\s*(\d+)/.exec(label);
-  return m ? gradeKey(`${m[1]}.${m[2]}`) : 999;
+  return m ? `${m[1]}.${m[2]}` : null;
+}
+
+/** gradeKey of the ชั้น named anywhere in a label; 999 when there is none. */
+function gradeRankOfLabel(label: string): number {
+  return gradeKey(gradeInLabel(label));
 }
 
 /**
@@ -57,7 +67,7 @@ function gradeInLabel(label: string): number {
  * keeps to the end, in its own order.
  */
 export function compareClassLabels(a: string, b: string): number {
-  return gradeInLabel(a) - gradeInLabel(b) || a.localeCompare(b, 'th', { numeric: true });
+  return gradeRankOfLabel(a) - gradeRankOfLabel(b) || a.localeCompare(b, 'th', { numeric: true });
 }
 
 /**
