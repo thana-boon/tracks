@@ -4,6 +4,7 @@ import { currentUser } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { listSections, studentsInSection, classDatesOf } from '@/lib/data';
 import { AttendanceSheet, type AttendanceSheetSection } from '@/lib/pdf-attendance';
+import { byClassOrder } from '@/lib/utils';
 import { withRenderSlot } from '@/lib/render-queue';
 import { busyResponse, isBusy, pdfResponse } from '@/lib/pdf-response';
 
@@ -45,8 +46,11 @@ export async function GET(req: NextRequest) {
   const columns = Math.min(16, Math.max(1, Number(params.get('columns')) || 16));
 
   // Scoped to the active year by listSections, so an id from another year — or
-  // a made-up one — simply does not come back.
-  const rows = (await listSections(year.id)).filter((s) => wanted.has(s.id));
+  // a made-up one — simply does not come back. Pages come out in ชั้น/กลุ่ม
+  // order, the same order the ticks were read in on the print screen.
+  const rows = (await listSections(year.id))
+    .filter((s) => wanted.has(s.id))
+    .sort(byClassOrder);
   if (rows.length === 0) return NextResponse.json({ error: 'section not found' }, { status: 404 });
 
   const sections: AttendanceSheetSection[] = await Promise.all(

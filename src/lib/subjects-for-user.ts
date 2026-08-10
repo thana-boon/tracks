@@ -9,6 +9,7 @@ import {
   trackGroups,
   trackSubjects,
 } from '@/db/schema';
+import { byClassOrder } from './utils';
 import type { YearRow } from './years';
 
 /** One date classes are held on, with how many รอบเรียน meet that day. */
@@ -106,8 +107,9 @@ export interface SectionOnDay {
 
 /**
  * Sections that meet on one date, with their room and how far the check-in has
- * got. Any teacher may take any section's attendance (spec §3), so this is not
- * scoped by teacher — the list is the same for admin and teacher.
+ * got, in ชั้น/กลุ่ม order. Any teacher may take any section's attendance (spec
+ * §3), so this is not scoped by teacher — the list is the same for admin and
+ * teacher.
  */
 export async function sectionsOnDate(year: YearRow, date: string): Promise<SectionOnDay[]> {
   const [sections, counts, checked] = await Promise.all([
@@ -155,12 +157,16 @@ export async function sectionsOnDate(year: YearRow, date: string): Promise<Secti
     checked.map((c) => [`${c.sectionId}:${c.slot}`, Number(c.present)]),
   );
 
-  return sections.map((s) => ({
-    ...s,
-    studentCount: countBy.get(s.id) ?? 0,
-    morningChecked: presentBy.has(`${s.id}:morning`),
-    afternoonChecked: presentBy.has(`${s.id}:afternoon`),
-    morningPresent: presentBy.get(`${s.id}:morning`) ?? null,
-    afternoonPresent: presentBy.get(`${s.id}:afternoon`) ?? null,
-  }));
+  // Ordered in JS, not by the query: "ม.4 กลุ่มเรียนที่ 10" has to follow
+  // "กลุ่มเรียนที่ 2", which no SQL collation gets right on its own.
+  return sections
+    .map((s) => ({
+      ...s,
+      studentCount: countBy.get(s.id) ?? 0,
+      morningChecked: presentBy.has(`${s.id}:morning`),
+      afternoonChecked: presentBy.has(`${s.id}:afternoon`),
+      morningPresent: presentBy.get(`${s.id}:morning`) ?? null,
+      afternoonPresent: presentBy.get(`${s.id}:afternoon`) ?? null,
+    }))
+    .sort(byClassOrder);
 }

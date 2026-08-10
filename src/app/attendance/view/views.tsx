@@ -29,6 +29,7 @@ import {
 import {
   THAI_WEEKDAYS,
   THAI_WEEKDAYS_SHORT,
+  byClassOrder,
   cn,
   thaiDateLong,
   thaiDateShort,
@@ -246,9 +247,10 @@ function SectionRow({ section: s, date }: { section: SectionOnDay; date: string 
         {s.subjectCode}
       </span>
       <div className="min-w-0 flex-1">
+        {/* ชั้น/กลุ่ม leads the line because it is what the list is sorted by */}
         <p className="flex flex-wrap items-center gap-2">
-          <span className="truncate font-medium">{s.subjectName}</span>
           <Badge tone="navy">{s.name}</Badge>
+          <span className="truncate font-medium">{s.subjectName}</span>
         </p>
         <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
           <span>{s.groupCode}</span>
@@ -549,7 +551,7 @@ function PresenceCell({ value }: { value: boolean | null }) {
 /* ── The whole year for one กลุ่ม — the matrix behind “สรุปทั้งปี” ───────── */
 
 export async function TermSummary({ year, sectionId }: { year: YearRow; sectionId: number }) {
-  const sections = await listSections(year.id);
+  const sections = (await listSections(year.id)).sort(byClassOrder);
   if (sections.length === 0)
     return (
       <EmptyState

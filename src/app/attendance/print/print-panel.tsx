@@ -200,11 +200,12 @@ export function PrintPanel({
                     {on ? <Check className="size-3.5" strokeWidth={3} /> : null}
                   </span>
                   <span className="min-w-0 flex-1">
+                    {/* ชั้น/กลุ่ม leads the line because it is what the list is sorted by */}
                     <span className="flex flex-wrap items-center gap-2 text-sm">
+                      <Badge tone="navy">{s.name}</Badge>
                       <span className="truncate font-medium">
                         {s.subjectCode} — {s.subjectName}
                       </span>
-                      <Badge tone="navy">{s.name}</Badge>
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
                       <span>{s.groupCode}</span>

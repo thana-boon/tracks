@@ -40,6 +40,46 @@ export function sortGrades(grades: (string | null)[]): string[] {
   );
 }
 
+/** gradeKey of the ชั้น named anywhere in a label; 999 when there is none. */
+function gradeInLabel(label: string): number {
+  const m = /(?:^|[\s([-])([อปม])\.?\s*(\d+)/.exec(label);
+  return m ? gradeKey(`${m[1]}.${m[2]}`) : 999;
+}
+
+/**
+ * ชั้น/กลุ่ม order for a รอบเรียน label: "ม.4 กลุ่มเรียนที่ 1" → "ม.4 กลุ่มเรียนที่ 2"
+ * → "ม.5 กลุ่มเรียนที่ 1", which is the order a teacher reads a room list in.
+ *
+ * The ชั้น is pulled out first so it outranks the rest of the label however the
+ * รอบ was named — "รอบบ่าย ม.5" belongs with ม.5, not under ร — and what is left
+ * is compared with Thai numeric collation so กลุ่ม 10 lands after กลุ่ม 2 rather
+ * than after กลุ่ม 1. A label with no ชั้น in it (a รอบ named after its date)
+ * keeps to the end, in its own order.
+ */
+export function compareClassLabels(a: string, b: string): number {
+  return gradeInLabel(a) - gradeInLabel(b) || a.localeCompare(b, 'th', { numeric: true });
+}
+
+/**
+ * How เช็คชื่อ, ผลเช็คชื่อ and พิมพ์ใบเช็คชื่อ order รอบเรียน — by the ชั้น/กลุ่ม
+ * on the label first, and only then by หมวด and วิชา.
+ *
+ * These three screens are read the other way round from the register: the
+ * teacher already knows which room is in front of them and is hunting for its
+ * line, so ordering by วิชา first left ม.4 and ม.5 interleaved down the list and
+ * every print run had to be checked line by line.
+ */
+export function byClassOrder<T extends { name: string; groupCode: string; subjectCode: string }>(
+  a: T,
+  b: T,
+): number {
+  return (
+    compareClassLabels(a.name, b.name) ||
+    a.groupCode.localeCompare(b.groupCode, 'th', { numeric: true }) ||
+    a.subjectCode.localeCompare(b.subjectCode, 'th', { numeric: true })
+  );
+}
+
 /** The three grades this system serves — วิชาเสริมมีเฉพาะ ม.ปลาย. */
 export const TRACK_GRADES = ['ม.4', 'ม.5', 'ม.6'];
 

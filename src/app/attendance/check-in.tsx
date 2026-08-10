@@ -201,9 +201,10 @@ function SectionList({
                     {s.subjectCode}
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col gap-1">
+                    {/* ชั้น/กลุ่ม leads the line because it is what the list is sorted by */}
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="truncate font-medium">{s.subjectName}</span>
                       <Badge tone="navy">{s.name}</Badge>
+                      <span className="truncate font-medium">{s.subjectName}</span>
                     </span>
                     <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
