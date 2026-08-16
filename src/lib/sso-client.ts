@@ -34,7 +34,24 @@ export interface SsoConfig {
 const SUPPRESS_MS = 15 * 60 * 1000;
 const SUPPRESS_KEY = 'tracks:signed-out-at';
 
-/** Session storage is per tab; this has to be per browser — see above. */
+/**
+ * How long one automatic trip to the SchoolOS front door rules out the next.
+ *
+ * The bounce is for the ordinary visitor with no platform session, and for them
+ * it happens once and ends at a portal login. The window is for the two
+ * journeys where it does not end there: a browser that keeps arriving without a
+ * session — a bookmark, a handoff this deployment cannot mint — would otherwise
+ * ping-pong between the two systems for ever, and the local ผู้ดูแล, whose
+ * password is the way in on the day SchoolOS is down, could never reach our own
+ * form. Both want the same answer: after one bounce, this page stays put.
+ *
+ * Long enough to type a password into the form it falls back to, short enough
+ * that the next visit is a fresh decision.
+ */
+const BOUNCE_MS = 5 * 60 * 1000;
+const BOUNCE_KEY = 'tracks:sent-to-portal-at';
+
+/** Session storage is per tab; these have to be per browser — see above. */
 function store(): Storage | null {
   try {
     return window.localStorage;
@@ -45,33 +62,60 @@ function store(): Storage | null {
   }
 }
 
-/** Remember that a session ended here, so SSO does not immediately undo it. */
-export function markSignedOut(): void {
+function stamp(key: string): void {
   try {
-    store()?.setItem(SUPPRESS_KEY, String(Date.now()));
+    store()?.setItem(key, String(Date.now()));
   } catch {
     /* nothing worth breaking a logout over */
   }
 }
 
-/** True while a just-ended session should keep silent SSO from firing. */
-export function recentlySignedOut(): boolean {
-  const raw = store()?.getItem(SUPPRESS_KEY);
+/** True while the moment recorded under `key` is still inside `ms`. */
+function within(key: string, ms: number): boolean {
+  const raw = store()?.getItem(key);
   if (!raw) return false;
   const at = Number(raw);
   if (!Number.isFinite(at)) return false;
-  if (Date.now() - at < SUPPRESS_MS) return true;
-  // Past the window — drop it rather than re-reading a dead flag forever.
-  clearSignedOut();
+  if (Date.now() - at < ms) return true;
+  // Past the window — drop it rather than re-reading a dead flag for ever.
+  forget(key);
   return false;
 }
 
-export function clearSignedOut(): void {
+function forget(key: string): void {
   try {
-    store()?.removeItem(SUPPRESS_KEY);
+    store()?.removeItem(key);
   } catch {
     /* ignore */
   }
+}
+
+/** Remember that a session ended here, so SSO does not immediately undo it. */
+export function markSignedOut(): void {
+  stamp(SUPPRESS_KEY);
+}
+
+/** True while a just-ended session should keep silent SSO from firing. */
+export function recentlySignedOut(): boolean {
+  return within(SUPPRESS_KEY, SUPPRESS_MS);
+}
+
+export function clearSignedOut(): void {
+  forget(SUPPRESS_KEY);
+}
+
+/** Remember that this browser has just been sent to the SchoolOS front door. */
+export function markSentToPortal(): void {
+  stamp(BOUNCE_KEY);
+}
+
+/** True while a recent trip to the portal should stop this page making another. */
+export function recentlySentToPortal(): boolean {
+  return within(BOUNCE_KEY, BOUNCE_MS);
+}
+
+export function clearSentToPortal(): void {
+  forget(BOUNCE_KEY);
 }
 
 /** The deployment's SSO settings, read from our own server at runtime. */
