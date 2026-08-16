@@ -1,4 +1,4 @@
-import { SignJWT, decodeJwt, jwtVerify } from 'jose';
+import { SignJWT, jwtVerify } from 'jose';
 
 /**
  * Signing and verifying the session token — and nothing else.
@@ -161,27 +161,6 @@ export async function verifySession(token: string): Promise<SessionClaims | null
     if (typeof claims.bornAt !== 'number') claims.bornAt = claims.iat;
     if (claims.bornAt + sessionMaxSeconds() < Math.floor(Date.now() / 1000)) return null;
     return claims;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * How a token that has just been REFUSED was obtained.
- *
- * The one question left to ask about a session that has ended: an SSO session
- * goes back to the SchoolOS front door, a password session stays on our own
- * form, because a local ผู้ดูแล has nothing to sign in with over there.
- *
- * Reads the claims without verifying them, and that is safe for exactly this:
- * the token is already refused, nothing is granted on the answer, and the worst
- * a forged `via` can buy its author is being sent to the wrong login screen.
- * Verifying is not an option anyway — it just failed, which is why we are here.
- */
-export function refusedVia(token: string): SessionVia | null {
-  try {
-    const via = decodeJwt(token).via;
-    return via === 'sso' || via === 'password' ? via : null;
   } catch {
     return null;
   }

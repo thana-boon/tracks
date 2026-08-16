@@ -5,13 +5,11 @@ import {
   createSession,
   expCookieOptions,
   identityOf,
-  refusedVia,
   sessionCookieOptions,
   sessionExpiresAt,
   shouldRenew,
   verifySession,
 } from '@/lib/session-core';
-import { ENDED_PARAM, portalOf } from '@/lib/session-end';
 
 /**
  * The session gate, and the only place a session can be renewed.
@@ -29,50 +27,27 @@ import { ENDED_PARAM, portalOf } from '@/lib/session-end';
 const PROTECTED = ['/admin', '/teacher', '/student', '/attendance', '/results', '/homeroom'];
 
 /**
- * Off to the login page: this browser has no session, and never had one on this
- * visit. `next` carries the page they were reaching for, so signing in lands
- * them on it rather than on a dashboard.
+ * `expired` separates "your session ran out just now" from "you were never
+ * signed in here", and the login page needs the difference badly:
  *
- * Not the portal, and it matters: somebody who IS signed in to SchoolOS is
- * carried through this page silently and never sees it, and somebody who is not
- * is sent on to the portal from there — after the page has asked SchoolOS,
- * rather than on the strength of a missing cookie. That order is what keeps a
- * bookmark from bouncing between the two systems.
+ *  - it must not let silent SSO haul someone straight back in the instant the
+ *    idle timeout throws them out — that would make the timeout meaningless,
+ *    and they would never even see that it had happened.
+ *  - a session that ended belongs back at the SchoolOS front door, not parked
+ *    on our login form.
+ *
+ * Neither applies to somebody who simply opened a bookmark while signed out, and
+ * doing either to them would be wrong: that person we want SSO to catch.
  */
-function toLogin(req: NextRequest, pathname: string): NextResponse {
+function toLogin(req: NextRequest, pathname: string, expired: boolean): NextResponse {
   const url = req.nextUrl.clone();
   url.pathname = '/login';
   url.search = '';
   url.searchParams.set('next', pathname);
-  return signedOut(NextResponse.redirect(url));
-}
-
-/**
- * Off to the SchoolOS front door: a session this gate accepted before has run
- * out (our idle window, or the absolute cap). `next` is dropped with it — they
- * are leaving this app, and will come back through a fresh handoff.
- *
- * `ended=idle` — our own login page — is the destination only for those who
- * cannot use the portal: a local ผู้ดูแล, whose password is the way in on the
- * day SchoolOS is down, and a deployment with SSO off or no portal set. The
- * environment is read directly, and per request: ssoConfig() cannot come here
- * (it pulls in `server-only`), and moving the platform must stay an .env edit
- * rather than a rebuild.
- */
-function toEnd(req: NextRequest, token: string): NextResponse {
-  const stayHere = refusedVia(token) === 'password' || process.env.SSO_ENABLED === 'false';
-  const portal = stayHere ? null : portalOf(process.env.SCHOOLOS_PORTAL_URL);
-  if (portal) return signedOut(NextResponse.redirect(new URL(portal, req.nextUrl.origin)));
-
-  const url = req.nextUrl.clone();
-  url.pathname = '/login';
-  url.search = '';
-  url.searchParams.set(ENDED_PARAM, 'idle');
-  return signedOut(NextResponse.redirect(url));
-}
-
-/** The token is spent; leaving it on the browser only means the same bounce again. */
-function signedOut(res: NextResponse): NextResponse {
+  if (expired) url.searchParams.set('expired', '1');
+  const res = NextResponse.redirect(url);
+  // The token is spent; leaving it on the browser only means the same bounce
+  // again on the next click.
   res.cookies.delete(SESSION_COOKIE);
   res.cookies.delete(SESSION_EXP_COOKIE);
   return res;
@@ -83,13 +58,12 @@ export async function middleware(req: NextRequest) {
   if (!PROTECTED.some((p) => pathname.startsWith(p))) return NextResponse.next();
 
   const token = req.cookies.get(SESSION_COOKIE)?.value;
-  if (!token) return toLogin(req, pathname);
+  if (!token) return toLogin(req, pathname, false);
 
   // Also refuses tokens past the absolute cap, however recently renewed. A
-  // token that was here and is no longer accepted is a session that ended —
-  // and a session that ended goes back to the front door, not to a form.
+  // token that was here and is no longer accepted is a session that ended.
   const claims = await verifySession(token);
-  if (!claims) return toEnd(req, token);
+  if (!claims) return toLogin(req, pathname, true);
 
   const res = NextResponse.next();
   if (shouldRenew(claims)) {

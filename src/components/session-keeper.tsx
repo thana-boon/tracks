@@ -3,7 +3,6 @@
 import { useEffect, useRef } from 'react';
 import { withBasePath } from '@/lib/base-path';
 import { SESSION_EXP_COOKIE } from '@/lib/session-names';
-import { endedUrl, portalOf } from '@/lib/session-end';
 import { refreshSchoolOsSession, type SsoConfig } from '@/lib/sso-client';
 
 /**
@@ -93,32 +92,10 @@ export function SessionKeeper({ sso, via }: { sso: SsoConfig; via?: string }) {
         // them to the login page on their next move, which is correct. Renewing
         // blind from here could only ever revive something already gone.
         if (expiresAt !== null && expiresAt - now < RENEW_WHEN_REMAINING_MS) {
-          const res = await fetch(withBasePath('/api/auth/renew'), {
+          await fetch(withBasePath('/api/auth/renew'), {
             method: 'POST',
             signal: AbortSignal.timeout(10_000),
           }).catch(() => null);
-
-          // 401 is the one answer worth acting on: the session did not merely
-          // fail to renew, it has already ended, and /api/auth/renew is the only
-          // thing that will say so to a page nobody is navigating away from.
-          // Without this, a teacher working inside one screen keeps a dead
-          // session on the display until they finally click something — and the
-          // click lands on a redirect instead of the button they aimed at.
-          //
-          // A network failure is emphatically not this: `res` is null, we do
-          // nothing, and the next tick tries again.
-          if (res?.status === 401) {
-            // Straight to the SchoolOS front door — that is where signing in
-            // again happens, and a stop at our own form on the way helps
-            // nobody. Only a local ผู้ดูแล goes to that form instead: they have
-            // no platform session and nothing to sign in there with. The
-            // `?ended=idle` they arrive with is what holds SSO off for one idle
-            // window, so the timeout they just hit is not immediately undone by
-            // whoever the browser happens to be signed in as.
-            const portal = via === 'sso' && sso.enabled ? portalOf(sso.portalUrl) : null;
-            window.location.assign(endedUrl('idle', portal));
-            return;
-          }
         }
 
         // Only a session handed down from SchoolOS has one to keep alive. A
