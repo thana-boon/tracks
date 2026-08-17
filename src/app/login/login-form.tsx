@@ -6,11 +6,15 @@ import { toast } from 'sonner';
 import { Eye, EyeOff, LogIn, Loader2 } from 'lucide-react';
 import { Button, Input, Label } from '@/components/ui';
 import { withBasePath } from '@/lib/base-path';
+import { ENDED_PARAM, portalOf, sessionEndOf, type SessionEnd } from '@/lib/session-end';
 import {
+  clearSentToPortal,
   clearSignedOut,
   exchangeCode,
   getHandoffCode,
+  markSentToPortal,
   markSignedOut,
+  recentlySentToPortal,
   recentlySignedOut,
   type SsoConfig,
 } from '@/lib/sso-client';
@@ -23,8 +27,41 @@ import {
  */
 const RETRY_GAP_MS = 15_000;
 
-/** How long the "your session ended" notice stays up before the portal. */
+/** How long the notice explaining the trip stays up before the portal. */
 const LEAVE_AFTER_MS = 2_500;
+
+/**
+ * The one journey that still pauses on this page on its way to the SchoolOS
+ * front door: the visitor who never had a session here. SchoolOS says nobody is
+ * signed in, and signing in is something only SchoolOS can do — a teacher's or
+ * student's password lives there, not in this system — so the portal is the
+ * honest destination, not a form almost nobody who lands on it can use. The
+ * pause is what makes that trip explainable, and gives the local ผู้ดูแล the way
+ * out of it.
+ *
+ * A session that ENDED never gets here: it is sent to the portal directly, by
+ * whichever side noticed (see session-end.ts).
+ */
+const LEAVING_NOTICE = {
+  title: 'ยังไม่ได้เข้าสู่ระบบ SchoolOS',
+  body: 'ระบบวิชาเสริมใช้บัญชีเดียวกับ SchoolOS กำลังพาไปหน้าแรกของ SchoolOS เพื่อเข้าสู่ระบบก่อน แล้วกลับมาที่ระบบวิชาเสริมได้เลย…',
+};
+
+/**
+ * The exception to that: a session that ended and had nowhere to be sent — a
+ * deployment with no portal, or a local ผู้ดูแล, who has no SchoolOS account to
+ * go back to. For them this form IS the way back in, so the reason is a line
+ * above it rather than a screen in front of it.
+ */
+const ENDED_NOTICE: Record<SessionEnd, string> = {
+  idle: 'หมดเวลาการใช้งาน — ไม่มีการใช้งานนานเกินกำหนด ระบบจึงออกจากระบบให้อัตโนมัติ',
+  sso: 'เซสชัน SchoolOS สิ้นสุดแล้ว ระบบวิชาเสริมจึงออกจากระบบตามไปด้วย',
+};
+
+/** Is there anywhere to send them? */
+function portalFor(sso: SsoConfig): string | null {
+  return sso.enabled ? portalOf(sso.portalUrl) : null;
+}
 
 export function LoginForm({ sso }: { sso: SsoConfig }) {
   const router = useRouter();
@@ -37,12 +74,18 @@ export function LoginForm({ sso }: { sso: SsoConfig }) {
 
   const gone = params.get('gone');
   /**
-   * Read once, at mount, and then taken out of the address bar. Left in place it
-   * would fire again on every refresh and every press of Back — turning "your
-   * session ended" into a page that keeps throwing the user at the portal.
+   * Why the last session ended, if it did — read once, at mount, and then taken
+   * out of the address bar. Left in place it would fire again on every refresh
+   * and every press of Back, turning "your session ended" into a page that keeps
+   * throwing the user at the portal.
    */
-  const [ended] = useState(() => params.get('expired') === '1');
+  const [ended] = useState(() => sessionEndOf(params.get(ENDED_PARAM)));
+
+  /** Set while this page is on its way to the portal. */
   const [leaving, setLeaving] = useState(false);
+
+  /** Where "the portal" is, or null on a deployment that has none. */
+  const portal = portalFor(sso);
 
   /**
    * Whether to keep the form hidden while SSO is being tried.
@@ -89,8 +132,17 @@ export function LoginForm({ sso }: { sso: SsoConfig }) {
     state.at = Date.now();
     try {
       const code = await getHandoffCode(sso);
-      // Not signed in to SchoolOS, or it would not say. Ordinary; show the form.
+      // Not signed in to SchoolOS, or it would not say. Ordinary — and the
+      // ordinary answer to it is the platform's front door, where they can
+      // actually sign in, rather than a form whose only account is the local
+      // ผู้ดูแล. Once per window, so the two systems cannot bounce a browser
+      // back and forth and so that admin can still reach the form (see
+      // BOUNCE_MS, and the "stay here" link on the notice).
       if (!code) {
+        if (portal && !recentlySentToPortal()) {
+          markSentToPortal();
+          setLeaving(true);
+        }
         setProbing(false);
         return;
       }
@@ -98,6 +150,7 @@ export function LoginForm({ sso }: { sso: SsoConfig }) {
       const res = await exchangeCode(code);
       if (res.ok) {
         clearSignedOut();
+        clearSentToPortal();
         const next = params.get('next');
         const safeNext = next && next.startsWith('/') && !next.startsWith('//') ? next : null;
         router.replace(safeNext ?? res.redirect ?? '/');
@@ -115,25 +168,30 @@ export function LoginForm({ sso }: { sso: SsoConfig }) {
     } finally {
       state.running = false;
     }
-  }, [sso, router, params]);
+  }, [sso, portal, router, params]);
 
   // ── first pass ───────────────────────────────────────────────
   useEffect(() => {
     // Strip the one-shot markers so a refresh is a plain visit to /login.
     const url = new URL(window.location.href);
-    if (url.searchParams.has('expired') || url.searchParams.has('gone')) {
-      url.searchParams.delete('expired');
+    if (url.searchParams.has(ENDED_PARAM) || url.searchParams.has('gone')) {
+      url.searchParams.delete(ENDED_PARAM);
       url.searchParams.delete('gone');
       window.history.replaceState(null, '', url.toString());
     }
 
     if (ended) {
-      // The session ran out. Holding SSO off for one idle window is what makes
-      // the timeout mean anything — without it they are signed straight back in
-      // and never learn they were signed out at all.
-      markSignedOut();
+      // Anybody who could have gone to the portal is already there — arriving
+      // here with a reason means this form is the only door left, so it is shown
+      // straight away with the reason above it, and nobody is sent anywhere.
+      //
+      // Only our own idle timeout holds SSO off, and only for one window: that
+      // is what makes the timeout mean anything, since otherwise they are signed
+      // straight back in and never learn it happened. When it was the SchoolOS
+      // session that ended there is nothing to hold off — there is no platform
+      // session left to sign them back in with (see session-end.ts).
+      if (ended === 'idle') markSignedOut();
       setProbing(false);
-      setLeaving(true);
       return;
     }
 
@@ -181,19 +239,20 @@ export function LoginForm({ sso }: { sso: SsoConfig }) {
     };
   }, [sso.enabled, ended, trySilentSignIn]);
 
-  // ── an ended session belongs at the platform's front door ────
+  // ── nobody signed in here belongs at the platform's front door ────
   /**
-   * Only ever on the way out of a session that just ended — never something this
-   * page does merely by rendering. A login page that bounces on sight loops
-   * against the portal, and it would put the local ผู้ดูแล account out of reach
-   * as well, so the day SchoolOS is down this system would go down with it. The
-   * "stay here" link below exists for exactly that day.
+   * Never something this page does merely by rendering: it leaves only after
+   * SchoolOS itself has answered that this browser has no session to hand over.
+   * A login page that bounced on sight would loop against the portal, and would
+   * put the local ผู้ดูแล account out of reach as well, so the day SchoolOS is
+   * down this system would go down with it. The one-bounce window and the "stay
+   * here" link below exist for exactly that day.
    */
   useEffect(() => {
-    if (!leaving) return;
-    const t = window.setTimeout(() => window.location.assign(sso.portalUrl), LEAVE_AFTER_MS);
+    if (!leaving || !portal) return;
+    const t = window.setTimeout(() => window.location.assign(portal), LEAVE_AFTER_MS);
     return () => window.clearTimeout(t);
-  }, [leaving, sso.portalUrl]);
+  }, [leaving, portal]);
 
   function onType(setter: (v: string) => void) {
     return (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -219,6 +278,7 @@ export function LoginForm({ sso }: { sso: SsoConfig }) {
       }
       // In, by hand. Whatever ended the last session is settled.
       clearSignedOut();
+      clearSentToPortal();
       toast.success(`ยินดีต้อนรับ ${data.name ?? ''}`.trim());
       // `next` comes off the query string: only a path within this app is a
       // legal destination. "//evil.example" also starts with "/" and would send
@@ -234,22 +294,25 @@ export function LoginForm({ sso }: { sso: SsoConfig }) {
     }
   }
 
-  if (leaving)
+  if (leaving && portal)
     return (
       <div className="space-y-4 anim-fade-up">
         <div className="rounded-xl border border-border bg-secondary/40 p-4">
-          <p className="text-sm font-medium">หมดเวลาการใช้งาน</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            ไม่มีการใช้งานนานเกินกำหนด ระบบจึงออกจากระบบให้อัตโนมัติ
-            กำลังพากลับไปหน้าแรกของ SchoolOS…
-          </p>
+          <p className="text-sm font-medium">{LEAVING_NOTICE.title}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{LEAVING_NOTICE.body}</p>
         </div>
-        <Button size="lg" className="w-full" onClick={() => window.location.assign(sso.portalUrl)}>
+        <Button size="lg" className="w-full" onClick={() => window.location.assign(portal)}>
           ไปหน้าแรก SchoolOS
         </Button>
         <button
           type="button"
-          onClick={() => setLeaving(false)}
+          onClick={() => {
+            // Staying is a decision, and it has to survive a refresh — otherwise
+            // the ผู้ดูแล who mistypes a password and reloads is thrown at the
+            // portal again. The bounce window is exactly that memory.
+            markSentToPortal();
+            setLeaving(false);
+          }}
           className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:underline"
         >
           เข้าสู่ระบบที่หน้านี้แทน
@@ -267,6 +330,12 @@ export function LoginForm({ sso }: { sso: SsoConfig }) {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      {ended ? (
+        <div className="rounded-xl border border-border bg-secondary/40 p-3 text-sm text-muted-foreground">
+          {ENDED_NOTICE[ended]}
+        </div>
+      ) : null}
+
       {ssoError ? (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
           {ssoError}
@@ -324,6 +393,22 @@ export function LoginForm({ sso }: { sso: SsoConfig }) {
         ระบบจะตรวจสอบประเภทบัญชีให้อัตโนมัติ — ผู้ดูแล ครู หรือนักเรียน
         (ครู/นักเรียนตรวจสอบผ่าน SchoolOS · นักเรียนเฉพาะ ม.4-6 ที่ซิงก์แล้ว)
       </p>
+
+      {/*
+        This form is now the fallback rather than the front door: anyone reaching
+        it without a SchoolOS session has either been bounced to the portal once
+        already or asked to stay. Either way the way in for a teacher or student
+        is over there, so it stays one click away.
+      */}
+      {portal ? (
+        <button
+          type="button"
+          onClick={() => window.location.assign(portal)}
+          className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:underline"
+        >
+          เข้าสู่ระบบด้วยบัญชี SchoolOS
+        </button>
+      ) : null}
     </form>
   );
 }

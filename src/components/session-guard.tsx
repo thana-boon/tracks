@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { withBasePath } from '@/lib/base-path';
+import { endedUrl, portalOf, type SessionEnd } from '@/lib/session-end';
 import {
   exchangeCode,
   fetchLiveSession,
@@ -88,15 +89,28 @@ export function SessionGuard({
   const busy = useRef(false);
   const lastCheck = useRef(0);
 
-  /** Drop our cookie and go back to the front door, on a full load. */
-  const signOut = useCallback(async (suppressSso: boolean) => {
-    if (suppressSso) markSignedOut();
-    await fetch(withBasePath('/api/auth/logout'), { method: 'POST' }).catch(() => null);
-    // Not router.replace: the session it would carry over is the one we just
-    // threw away, and a client navigation would re-render this page from a
-    // cache built for the wrong person.
-    window.location.assign(withBasePath('/login'));
-  }, []);
+  /**
+   * Drop our cookie and go back to a front door, on a full load.
+   *
+   * `ended` is set only when the session did not just become the wrong one but
+   * genuinely finished. That one goes to the SchoolOS front door itself, since
+   * signing in again is something only SchoolOS can do (see session-end.ts).
+   * Everywhere else our login page is the destination, because it is the only
+   * place that can say *why* this person may not be here.
+   */
+  const signOut = useCallback(
+    async ({ suppressSso = false, ended }: { suppressSso?: boolean; ended?: SessionEnd } = {}) => {
+      if (suppressSso) markSignedOut();
+      await fetch(withBasePath('/api/auth/logout'), { method: 'POST' }).catch(() => null);
+      // Not router.replace: the session it would carry over is the one we just
+      // threw away, and a client navigation would re-render this page from a
+      // cache built for the wrong person.
+      window.location.assign(
+        ended ? endedUrl(ended, portalOf(sso.portalUrl)) : withBasePath('/login'),
+      );
+    },
+    [sso.portalUrl],
+  );
 
   const check = useCallback(async () => {
     if (busy.current) return;
@@ -119,18 +133,20 @@ export function SessionGuard({
       setSwapping(true);
 
       // Nobody is signed in to SchoolOS any more — they logged out of the
-      // platform, from here or from another tab. Our session was only ever
-      // theirs on loan, so it goes too. No suppression: if they sign back in
-      // next door, the login page should pick them straight up.
+      // platform, or its own idle window ran out, here or in another tab. Our
+      // session was only ever theirs on loan, so it goes too, and they are taken
+      // back to the portal: signing in again is something only SchoolOS can do
+      // for them, and our login form cannot (their password lives there, not
+      // here). No suppression — once they are back in, SSO should pick them up.
       if (!live.valid) {
-        await signOut(false);
+        await signOut({ ended: 'sso' });
         return;
       }
 
       // Somebody else is. One takeover attempt, then we stop trying — see
       // SWAP_GUARD_MS.
       if (swappedRecently()) {
-        await signOut(true);
+        await signOut({ suppressSso: true });
         return;
       }
       noteSwap();
@@ -148,7 +164,7 @@ export function SessionGuard({
       // They are signed in to SchoolOS but cannot have a session here — not on
       // the roster, graduated, resigned. The login page says which; all we can
       // do is stop showing them the previous person's screen.
-      await signOut(false);
+      await signOut();
     } finally {
       busy.current = false;
     }
