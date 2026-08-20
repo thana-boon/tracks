@@ -2,13 +2,13 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { Menu, X, LogOut, PanelLeftClose, PanelLeft, ChevronDown } from 'lucide-react';
-import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { withBasePath } from '@/lib/base-path';
-import { logoutUrl, markSignedOut, type SsoConfig } from '@/lib/sso-client';
+import type { SsoConfig } from '@/lib/sso-client';
+import { AccountMenu } from './account-menu';
 import { Avatar } from './avatar';
+import { useLogout } from './use-logout';
 import { SessionKeeper } from './session-keeper';
 import { SessionGuard } from './session-guard';
 import {
@@ -122,14 +122,13 @@ export function AppShell({
             ) : null}
           </div>
           <div className="ml-auto flex items-center gap-3">
-            <div className="hidden text-right sm:block">
-              <p className="text-sm font-medium leading-tight">{name}</p>
-              <p className="text-xs text-muted-foreground">{roleLabel[role]}</p>
-            </div>
-            <Avatar
-              src={photoUrl}
-              name={firstName || name}
-              className="size-9 bg-primary text-sm font-semibold text-[#F5C518]"
+            <AccountMenu
+              role={role}
+              name={name}
+              firstName={firstName}
+              photoUrl={photoUrl}
+              sso={sso}
+              via={via}
             />
           </div>
         </header>
@@ -257,56 +256,9 @@ function SidebarContent({
   onClose?: () => void;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   /** Groups the user has opened or shut by hand; the rest follow the route. */
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
-  const [leaving, setLeaving] = useState(false);
-
-  /**
-   * Sign out of this system, and then out of SchoolOS.
-   *
-   * Order matters and so does the `await`. Our own cookie is cleared first,
-   * on our own origin, and we wait for it: firing that request off and changing
-   * the page in the same breath lets the browser cancel it mid-flight, and the
-   * failure is completely silent.
-   *
-   * Then a top-level navigation to the platform's logout — not a background
-   * POST, for the same reason. Signing out of here alone would not be signing
-   * out at all: the SchoolOS cookie belongs to the browser, not the tab, and
-   * the next visit to this system would be walked straight back in by SSO. On
-   * the shared machines in the staff room, that is the difference between a
-   * logout button and a decoration.
-   *
-   * The "recently signed out" flag is deliberately NOT set on that path. It
-   * exists to stop SSO undoing an *idle timeout*; pressing this button is not
-   * that, and ending the SchoolOS session already stops SSO bringing them back —
-   * whereas setting the flag would lock somebody out of silent sign-in for a
-   * quarter of an hour after they had signed into SchoolOS again, which is
-   * precisely the journey this button is usually the first step of. The local
-   * ผู้ดูแล is the exception, below: there is no platform session of theirs to
-   * end, so the flag is the only thing keeping SSO from signing them straight
-   * back in as whoever else the browser is holding.
-   */
-  async function logout() {
-    if (leaving) return;
-    setLeaving(true);
-    await fetch(withBasePath('/api/auth/logout'), { method: 'POST' }).catch(() => null);
-
-    // Only a session handed down from SchoolOS ends over there. A local ผู้ดูแล
-    // has no platform session of their own, so following this branch would tear
-    // down whichever SchoolOS session the browser happens to be holding — on
-    // somebody else's behalf — and then strand the admin at a portal they have
-    // no account for. They get the flag instead: without it silent SSO signs
-    // them straight back in as that other person on the next page.
-    if (sso.enabled && via === 'sso') {
-      window.location.assign(logoutUrl(sso));
-      return;
-    }
-    if (sso.enabled) markSignedOut();
-    toast.success('ออกจากระบบแล้ว');
-    router.replace('/login');
-    router.refresh();
-  }
+  const { logout, leaving } = useLogout({ sso, via });
 
   // Exact match for dashboards and for any entry that has sub-entries of its
   // own: /attendance/view, /attendance/print and /results/subject are separate
