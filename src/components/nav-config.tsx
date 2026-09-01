@@ -6,6 +6,7 @@ import {
   BookOpen,
   School,
   ClipboardPen,
+  Route,
   ClipboardCheck,
   Eye,
   Printer,
@@ -77,6 +78,14 @@ export function navFor(role: AppRole): NavEntry[] {
         ],
       },
       {
+        label: 'Track',
+        icon: <Route className="size-5" strokeWidth={sw} />,
+        items: [
+          { href: '/admin/tracks', label: 'จัดการ Track', icon: <Route className="size-5" strokeWidth={sw} /> },
+          { href: '/admin/tracks/students', label: 'การเลือกของนักเรียน', icon: <Users className="size-5" strokeWidth={sw} /> },
+        ],
+      },
+      {
         label: 'งานเช็คชื่อ',
         icon: <ClipboardCheck className="size-5" strokeWidth={sw} />,
         items: [
@@ -126,6 +135,7 @@ export function navFor(role: AppRole): NavEntry[] {
   // student
   return [
     { href: '/student', label: 'วิชาเสริมของฉัน', icon: <LayoutDashboard className="size-5" strokeWidth={sw} /> },
+    { href: '/student/track', label: 'เลือก Track', icon: <Route className="size-5" strokeWidth={sw} /> },
   ];
 }
 

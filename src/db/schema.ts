@@ -362,3 +362,92 @@ export const activityLogs = pgTable(
   },
   (t) => [index('activity_logs_created_idx').on(t.createdAt)],
 );
+
+// ── Track (สายการเรียน) ─────────────────────────────────────
+// A different thing from track_groups/track_subjects above: those are the
+// catalogue of วิชาเสริม a student is *assigned* to by an admin. A Track is the
+// สายการเรียน a student *chooses for themselves*, once, for one ภาคเรียน — and
+// once chosen only an admin can move them.
+//
+// Scoped to a year *and* a ภาคเรียน because the offer changes between terms,
+// and to a set of ระดับชั้น because ม.4 and ม.6 are not offered the same สาย.
+export const tracks = pgTable(
+  'tracks',
+  {
+    id: serial('id').primaryKey(),
+    yearId: integer('year_id')
+      .notNull()
+      .references(() => academicYears.id, { onDelete: 'cascade' }),
+    /** ภาคเรียน — 1 or 2 */
+    semester: integer('semester').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** ระดับชั้นที่เลือกสายนี้ได้ — ["ม.4","ม.5"]; empty means every ชั้น */
+    gradeLevels: jsonb('grade_levels').$type<string[]>().notNull().default([]),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('tracks_term_name_uq').on(t.yearId, t.semester, t.name),
+    index('tracks_term_idx').on(t.yearId, t.semester),
+  ],
+);
+
+// ── ข้อย่อยของ Track (แขนงในสาย) ────────────────────────────
+// Optional per track: TrackSM splits into กฎหมาย / บริหาร, while another สาย has
+// no split at all. A track that has options makes picking one mandatory — a
+// half-made choice is not a choice.
+export const trackOptions = pgTable(
+  'track_options',
+  {
+    id: serial('id').primaryKey(),
+    trackId: integer('track_id')
+      .notNull()
+      .references(() => tracks.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** display order on the เลือก Track screen */
+    sortOrder: integer('sort_order').notNull().default(0),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('track_options_name_uq').on(t.trackId, t.name),
+    index('track_options_track_idx').on(t.trackId),
+  ],
+);
+
+// ── การเลือก Track ของนักเรียน ──────────────────────────────
+// One row per student per ภาคเรียน — that is what "เลือกได้ครั้งเดียว" means, and
+// the unique index is what enforces it rather than a check the UI could be
+// talked out of. The row is never deleted by a student: an admin moving someone
+// updates it in place and `changedBy`/`changedAt` records who did.
+export const trackChoices = pgTable(
+  'track_choices',
+  {
+    id: serial('id').primaryKey(),
+    yearId: integer('year_id')
+      .notNull()
+      .references(() => academicYears.id, { onDelete: 'restrict' }),
+    semester: integer('semester').notNull(),
+    studentId: integer('student_id')
+      .notNull()
+      .references(() => people.id, { onDelete: 'restrict' }),
+    trackId: integer('track_id')
+      .notNull()
+      .references(() => tracks.id, { onDelete: 'restrict' }),
+    /** null when the track has no ข้อย่อย */
+    optionId: integer('option_id').references(() => trackOptions.id, { onDelete: 'restrict' }),
+    /** actor who first made the choice — the student themselves, or an admin */
+    chosenBy: text('chosen_by').notNull(),
+    chosenAt: timestamp('chosen_at').notNull().defaultNow(),
+    /** set only when an admin has since moved them */
+    changedBy: text('changed_by'),
+    changedAt: timestamp('changed_at'),
+  },
+  (t) => [
+    uniqueIndex('track_choices_term_student_uq').on(t.yearId, t.semester, t.studentId),
+    index('track_choices_track_idx').on(t.trackId),
+    index('track_choices_student_idx').on(t.studentId),
+  ],
+);

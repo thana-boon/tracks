@@ -1,0 +1,255 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { CheckCircle2, History, Lock, Route } from 'lucide-react';
+import { toast } from 'sonner';
+import { Badge, Button, Card, CardHeader, EmptyState, Select } from '@/components/ui';
+import { useDialog } from '@/components/dialog';
+import { termLabel, type Term, type TrackRow } from '@/lib/track-core';
+import { cn } from '@/lib/utils';
+import { chooseTrack } from './actions';
+
+export interface MyChoice {
+  trackName: string;
+  optionName: string | null;
+  chosenAt: string;
+  changedByAdmin: boolean;
+}
+
+export interface HistoryRow {
+  key: string;
+  year: string;
+  semester: number;
+  trackName: string;
+  optionName: string | null;
+}
+
+export function TrackChooser({
+  term,
+  terms,
+  openTerm,
+  isOpenTerm,
+  gradeLevel,
+  tracks,
+  choice,
+  history,
+}: {
+  term: Term;
+  terms: Term[];
+  openTerm: Term;
+  isOpenTerm: boolean;
+  gradeLevel: string | null;
+  tracks: TrackRow[];
+  choice: MyChoice | null;
+  history: HistoryRow[];
+}) {
+  const router = useRouter();
+  const dialog = useDialog();
+  const [trackId, setTrackId] = useState<number | null>(null);
+  const [optionId, setOptionId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const selected = tracks.find((t) => t.id === trackId) ?? null;
+
+  function gotoTerm(value: string) {
+    const [yearId, semester] = value.split(':');
+    router.push(`/student/track?year=${yearId}&semester=${semester}`);
+  }
+
+  async function submit() {
+    if (saving || !selected) return;
+    if (selected.options.length && !optionId) {
+      toast.error(`เลือกข้อย่อยของ “${selected.name}” ด้วย`);
+      return;
+    }
+    // The last stop before a choice that only an admin can undo — said plainly,
+    // with the สาย and แขนง in it, because that is the sentence they have to
+    // agree with.
+    const ok = await dialog.confirm({
+      title: `ยืนยันเลือก “${selected.name}”?`,
+      description: `${
+        optionId
+          ? `ข้อย่อย: ${selected.options.find((o) => o.id === optionId)?.name} · `
+          : ''
+      }เลือกแล้วเปลี่ยนเองไม่ได้ ต้องติดต่อผู้ดูแลระบบ`,
+    });
+    if (!ok) return;
+
+    setSaving(true);
+    const r = await chooseTrack({
+      yearId: term.yearId,
+      semester: term.semester,
+      trackId: selected.id,
+      optionId: selected.options.length ? optionId : null,
+    });
+    setSaving(false);
+    if (r.ok) {
+      toast.success(r.message);
+      router.refresh();
+    } else {
+      toast.error(r.message);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="flex flex-wrap items-center gap-3 p-4 sm:p-5">
+        <span className="text-sm font-medium">ภาคเรียน</span>
+        <Select
+          value={`${term.yearId}:${term.semester}`}
+          onChange={(e) => gotoTerm(e.target.value)}
+          className="h-10 w-64"
+        >
+          {terms.map((t) => (
+            <option key={`${t.yearId}:${t.semester}`} value={`${t.yearId}:${t.semester}`}>
+              {termLabel(t)}
+              {t.yearId === openTerm.yearId && t.semester === openTerm.semester
+                ? ' (เปิดให้เลือก)'
+                : ''}
+            </option>
+          ))}
+        </Select>
+        {gradeLevel ? <Badge tone="navy">{gradeLevel}</Badge> : null}
+      </Card>
+
+      {choice ? (
+        <Card className="p-5">
+          <div className="flex items-start gap-4">
+            <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-success/10 text-success">
+              <CheckCircle2 className="size-5.5" strokeWidth={1.8} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-muted-foreground">{termLabel(term)}</p>
+              <h2 className="mt-0.5 text-lg font-semibold">{choice.trackName}</h2>
+              {choice.optionName ? (
+                <Badge tone="primary" className="mt-1.5">
+                  {choice.optionName}
+                </Badge>
+              ) : null}
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Lock className="size-3.5" strokeWidth={1.8} />
+                เลือกแล้ว — ต้องการเปลี่ยน ติดต่อผู้ดูแลระบบ
+              </p>
+              {choice.changedByAdmin ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  รายการนี้ถูกปรับโดยผู้ดูแลระบบ
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </Card>
+      ) : !isOpenTerm ? (
+        <EmptyState
+          icon={<History className="size-8" strokeWidth={1.5} />}
+          title={`ไม่ได้เลือก Track ใน${termLabel(term)}`}
+          hint={`เลือกได้เฉพาะ${termLabel(openTerm)} ซึ่งเป็นภาคเรียนที่เปิดอยู่`}
+        />
+      ) : tracks.length === 0 ? (
+        <EmptyState
+          icon={<Route className="size-8" strokeWidth={1.5} />}
+          title="ยังไม่มี Track ให้เลือก"
+          hint={
+            gradeLevel
+              ? `ยังไม่มี Track ที่เปิดให้ ${gradeLevel} ใน${termLabel(term)} — รอผู้ดูแลเปิดให้เลือก`
+              : 'รอผู้ดูแลเปิดให้เลือก'
+          }
+        />
+      ) : (
+        <Card>
+          <CardHeader
+            icon={<Route className="size-4.5" strokeWidth={1.8} />}
+            title={`เลือก Track ของ${termLabel(term)}`}
+          />
+          <ul className="space-y-2.5 px-4 pb-4 sm:px-5">
+            {tracks.map((t) => {
+              const on = t.id === trackId;
+              return (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTrackId(t.id);
+                      if (t.id !== trackId) setOptionId(null);
+                    }}
+                    className={cn(
+                      'w-full rounded-xl border px-4 py-3.5 text-left transition-colors',
+                      on ? 'border-primary bg-primary/5' : 'border-border hover:bg-secondary/50',
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{t.name}</span>
+                      {t.options.length ? (
+                        <Badge tone="secondary">มีข้อย่อย {t.options.length} รายการ</Badge>
+                      ) : null}
+                    </div>
+                    {t.description ? (
+                      <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
+                    ) : null}
+                  </button>
+
+                  {on && t.options.length ? (
+                    <ul className="mt-2 space-y-2 pl-4">
+                      {t.options.map((o) => {
+                        const picked = o.id === optionId;
+                        return (
+                          <li key={o.id}>
+                            <button
+                              type="button"
+                              onClick={() => setOptionId(o.id)}
+                              className={cn(
+                                'w-full rounded-lg border px-3.5 py-2.5 text-left text-sm transition-colors',
+                                picked
+                                  ? 'border-primary bg-primary/5 font-medium'
+                                  : 'border-border hover:bg-secondary/50',
+                              )}
+                            >
+                              {o.name}
+                              {o.description ? (
+                                <span className="block text-xs font-normal text-muted-foreground">
+                                  {o.description}
+                                </span>
+                              ) : null}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
+            <p className="text-xs text-muted-foreground">
+              ตรวจสอบให้แน่ใจก่อนกดยืนยัน — เลือกได้ครั้งเดียว
+            </p>
+            <Button onClick={submit} disabled={saving || !selected}>
+              ยืนยันการเลือก
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {history.length ? (
+        <Card>
+          <CardHeader
+            icon={<History className="size-4.5" strokeWidth={1.8} />}
+            title="ประวัติการเลือก Track"
+          />
+          <ul className="divide-y divide-border/60">
+            {history.map((h) => (
+              <li key={h.key} className="flex items-center gap-3 px-4 py-3 sm:px-5">
+                <span className="w-44 shrink-0 text-xs text-muted-foreground">
+                  ปีการศึกษา {h.year} ภาคเรียนที่ {h.semester}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{h.trackName}</span>
+                {h.optionName ? <Badge tone="navy">{h.optionName}</Badge> : null}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+    </div>
+  );
+}

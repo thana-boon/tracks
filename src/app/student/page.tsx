@@ -1,4 +1,5 @@
-import { BookOpen, CalendarClock, MapPin } from 'lucide-react';
+import Link from 'next/link';
+import { BookOpen, CalendarClock, ChevronRight, MapPin, Route } from 'lucide-react';
 import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { buildYearResults } from '@/lib/transcript';
@@ -9,6 +10,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { Card, CardHeader, Badge, EmptyState, NeedYear, resultTone } from '@/components/ui';
 import { OVERALL_LABEL, PASS_MIN_RATIO } from '@/lib/evaluate';
 import { thaiDateShort } from '@/lib/utils';
+import { choiceOf, latestTerm, termLabel } from '@/lib/tracks';
 
 export const metadata = { title: 'วิชาเสริมของฉัน' };
 
@@ -20,6 +22,13 @@ export default async function StudentHome() {
 
   const [results] = await buildYearResults(year, [user.personId]);
   const lines = results?.lines ?? [];
+
+  // Track (สายการเรียน) for the ภาคเรียน currently open — either what they
+  // picked, or the invitation to pick. It sits on this page because this is the
+  // page a นักเรียน lands on, and a choice they have not made yet is the one
+  // thing here that needs them to do something.
+  const openTerm = await latestTerm();
+  const trackChoice = openTerm ? await choiceOf(user.personId, openTerm.yearId, openTerm.semester) : null;
 
   // Class days per section the student sits in, keyed the same way its
   // transcript line is — two รอบ of one วิชา have different days.
@@ -46,6 +55,36 @@ export default async function StudentHome() {
         </p>
         <div className="mt-4 h-0.5 w-10 rounded-full bg-[#F5C518]" />
       </section>
+
+      {openTerm ? (
+        <Link
+          href="/student/track"
+          className="flex items-center gap-4 rounded-2xl border border-border bg-card p-5 shadow-xs transition-colors hover:bg-secondary/40"
+        >
+          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+            <Route className="size-5" strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-muted-foreground">{termLabel(openTerm)}</p>
+            {trackChoice ? (
+              <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                <p className="font-semibold">{trackChoice.trackName}</p>
+                {trackChoice.optionName ? (
+                  <Badge tone="navy">{trackChoice.optionName}</Badge>
+                ) : null}
+              </div>
+            ) : (
+              <>
+                <p className="mt-0.5 font-semibold">ยังไม่ได้เลือก Track</p>
+                <p className="text-xs text-muted-foreground">
+                  กดเพื่อเลือกสายการเรียน — เลือกได้ครั้งเดียวต่อภาคเรียน
+                </p>
+              </>
+            )}
+          </div>
+          <ChevronRight className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+        </Link>
+      ) : null}
 
       {lines.length === 0 ? (
         <EmptyState
