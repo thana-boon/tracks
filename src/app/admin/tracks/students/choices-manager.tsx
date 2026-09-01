@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Route, Search, Users, Eraser, Pencil } from 'lucide-react';
+import { ChartPie, Route, Search, Users, Eraser, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Badge,
@@ -115,13 +115,22 @@ export function ChoicesManager({
             นักเรียนเลือกเองได้ครั้งเดียวต่อภาคเรียน — การเปลี่ยนหลังจากนั้นทำได้ที่หน้านี้เท่านั้น
           </p>
         </div>
-        <Link
-          href={`/admin/tracks?year=${term.yearId}&semester=${term.semester}`}
-          className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-medium hover:bg-secondary/60"
-        >
-          <Route className="size-4.5" strokeWidth={1.8} />
-          จัดการ Track
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={`/admin/tracks/report?year=${term.yearId}&semester=${term.semester}`}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-medium hover:bg-secondary/60"
+          >
+            <ChartPie className="size-4.5" strokeWidth={1.8} />
+            รายงานสรุป
+          </Link>
+          <Link
+            href={`/admin/tracks?year=${term.yearId}&semester=${term.semester}`}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-medium hover:bg-secondary/60"
+          >
+            <Route className="size-4.5" strokeWidth={1.8} />
+            จัดการ Track
+          </Link>
+        </div>
       </div>
 
       <Card className="flex flex-wrap items-center gap-3 p-4 sm:p-5">

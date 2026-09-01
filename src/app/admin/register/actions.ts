@@ -17,6 +17,7 @@ import {
 import { requireRole } from '@/lib/authz';
 import { actorOf } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
+import { SEMESTERS, trackChoiceRows, tracksForTerm } from '@/lib/tracks';
 import { logActivity } from '@/lib/log';
 import { normalizeYmd, thaiDateShort } from '@/lib/utils';
 import type { ActionResult } from '@/components/action-button';
@@ -38,7 +39,11 @@ const SectionInput = z.object({
  * Two รอบ of one วิชา are told apart by *who* is in them and *when* they meet —
  * "กลุ่ม A เรียนวันที่ 1, กลุ่ม B เรียนวันที่ 2" — so the label is read off
  * exactly that, in order of how well it identifies the รอบ: the กลุ่มเรียนพิเศษ
- * the roster came from, else the class days, else a plain number.
+ * the roster came from, else the สายการเรียน it came from, else the class days,
+ * else a plain number.
+ *
+ * The order matches the preview the editor shows while typing — if the two ever
+ * disagree, the ผู้ดูแล saves one name and gets another.
  */
 async function deriveSectionName(
   yearId: number,
@@ -71,6 +76,42 @@ async function deriveSectionName(
         base = name;
         break;
       }
+    }
+  }
+
+  // …else the สาย, when the roster is exactly one Track (or one of its ข้อย่อย)
+  // of this ปีการศึกษา — the chip on the editor is the usual way such a roster
+  // gets built, and "TrackSM · กฎหมาย" identifies the รอบ far better than the
+  // date it happens to meet on.
+  if (!base && studentIds.size) {
+    for (const semester of SEMESTERS) {
+      const [defined, chosen] = await Promise.all([
+        tracksForTerm(yearId, semester),
+        trackChoiceRows(yearId, semester),
+      ]);
+      for (const t of defined) {
+        const mine = chosen.filter((c) => c.trackId === t.id);
+        if (!mine.length) continue;
+        const candidates: { label: string; ids: number[] }[] = [
+          { label: t.name, ids: mine.map((c) => c.studentId) },
+          ...t.options.map((o) => ({
+            label: `${t.name} · ${o.name}`,
+            ids: mine.filter((c) => c.optionId === o.id).map((c) => c.studentId),
+          })),
+        ];
+        for (const c of candidates) {
+          if (
+            c.ids.length === studentIds.size &&
+            c.ids.length > 0 &&
+            c.ids.every((id) => studentIds.has(id))
+          ) {
+            base = c.label;
+            break;
+          }
+        }
+        if (base) break;
+      }
+      if (base) break;
     }
   }
 

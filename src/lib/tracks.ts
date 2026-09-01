@@ -1,10 +1,11 @@
 import 'server-only';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
-import { academicYears, trackChoices, trackOptions, tracks } from '@/db/schema';
+import { academicYears, people, trackChoices, trackOptions, tracks } from '@/db/schema';
 import { activeYear } from './years';
 import type { Term, TrackOptionRow, TrackRow } from './track-core';
 import { isSemester } from './track-core';
+import { buildTrackReport, type ReportStudent, type TrackReport } from './track-report';
 
 /**
  * Track (สายการเรียน) — the reading side. The constants, types and pure
@@ -212,4 +213,84 @@ export async function optionProblem(
   if (!opts.length) return optionId ? `“${track.name}” ไม่มีข้อย่อยให้เลือก` : null;
   if (!optionId) return `เลือกข้อย่อยของ “${track.name}” ด้วย`;
   return opts.some((o) => o.id === optionId) ? null : 'ไม่พบข้อย่อยนี้ใน Track ที่เลือก';
+}
+
+/**
+ * Everything the รายงานสรุป of one ภาคเรียน needs, in two queries.
+ *
+ * Every studying นักเรียน is in the list, not only those who chose — "ใครยัง
+ * ไม่เลือก" is one of the four questions the report exists to answer, and a
+ * left join is the only shape that can answer it.
+ */
+export async function trackReportFor(term: Term): Promise<TrackReport> {
+  const [defined, rows] = await Promise.all([
+    tracksForTerm(term.yearId, term.semester),
+    db
+      .select({
+        id: people.id,
+        code: people.code,
+        fullName: people.fullName,
+        nickname: people.nickname,
+        gradeLevel: people.gradeLevel,
+        classroom: people.classroom,
+        classNumber: people.classNumber,
+        trackId: trackChoices.trackId,
+        trackName: tracks.name,
+        optionId: trackChoices.optionId,
+        optionName: trackOptions.name,
+        chosenBy: trackChoices.chosenBy,
+        changedBy: trackChoices.changedBy,
+      })
+      .from(people)
+      .leftJoin(
+        trackChoices,
+        and(
+          eq(trackChoices.studentId, people.id),
+          eq(trackChoices.yearId, term.yearId),
+          eq(trackChoices.semester, term.semester),
+        ),
+      )
+      .leftJoin(tracks, eq(trackChoices.trackId, tracks.id))
+      .leftJoin(trackOptions, eq(trackChoices.optionId, trackOptions.id))
+      .where(and(eq(people.type, 'student'), eq(people.status, 'studying')))
+      .orderBy(asc(people.gradeLevel), asc(people.classroom), asc(people.classNumber)),
+  ]);
+
+  const students: ReportStudent[] = rows.map(({ chosenBy, changedBy, ...s }) => ({
+    ...s,
+    byAdmin: chosenBy !== null && (changedBy !== null || chosenBy.startsWith('admin:')),
+  }));
+  return buildTrackReport(term, defined, students);
+}
+
+/**
+ * Who chose what in one ภาคเรียน, as bare ids — the rows the
+ * จัดนักเรียนเข้าวิชา screen turns into 'ดึงจาก Track' chips.
+ *
+ * Ids only, and the ข้อย่อย alongside the สาย: the register screen already
+ * holds every นักเรียน by name, and sending the names a second time only gives
+ * the two copies a chance to disagree. Students who have left are filtered out
+ * here rather than on the screen — a สาย chip that adds someone no longer
+ * studying is a roster nobody can explain.
+ */
+export async function trackChoiceRows(
+  yearId: number,
+  semester: number,
+): Promise<{ trackId: number; optionId: number | null; studentId: number }[]> {
+  return db
+    .select({
+      trackId: trackChoices.trackId,
+      optionId: trackChoices.optionId,
+      studentId: trackChoices.studentId,
+    })
+    .from(trackChoices)
+    .innerJoin(people, eq(trackChoices.studentId, people.id))
+    .where(
+      and(
+        eq(trackChoices.yearId, yearId),
+        eq(trackChoices.semester, semester),
+        eq(people.type, 'student'),
+        eq(people.status, 'studying'),
+      ),
+    );
 }

@@ -9,6 +9,7 @@ import {
   trackSubjects,
 } from '@/db/schema';
 import { activeYear } from '@/lib/years';
+import { SEMESTERS, trackChoiceRows, tracksForTerm } from '@/lib/tracks';
 import {
   listSections,
   classDatesBySection,
@@ -22,6 +23,7 @@ import {
   type RegisterSection,
   type RegisterSubject,
   type StudentGroup,
+  type TrackSource,
 } from './register-manager';
 import type { PickStudent } from '@/components/student-picker';
 
@@ -117,6 +119,45 @@ export default async function RegisterPage() {
     memberIds: roomMembersBy.get(r.id) ?? [],
   }));
 
+  // ── ดึงรายชื่อจาก Track ─────────────────────────────────────
+  // A กลุ่มเรียน is very often exactly one สายการเรียน of the same ภาคเรียน, and
+  // re-ticking forty names that the นักเรียน already chose for themselves is
+  // both slow and a chance to get it wrong. Both ภาคเรียน of the active
+  // ปีการศึกษา are offered because a รอบเรียน is scoped to the year, not the
+  // term — the chip says which ภาคเรียน it came from, so nobody pulls last
+  // term's list by accident.
+  const trackSources: TrackSource[] = [];
+  for (const semester of SEMESTERS) {
+    const [defined, chosen] = await Promise.all([
+      tracksForTerm(year.id, semester),
+      trackChoiceRows(year.id, semester),
+    ]);
+    for (const t of defined) {
+      const mine = chosen.filter((c) => c.trackId === t.id);
+      if (!mine.length) continue;
+      trackSources.push({
+        key: `t${t.id}`,
+        semester,
+        trackName: t.name,
+        optionName: null,
+        memberIds: mine.map((c) => c.studentId),
+      });
+      // A สาย with แขนง is usually taught as one กลุ่ม per แขนง, so each is
+      // offered on its own as well as inside the whole สาย.
+      for (const o of t.options) {
+        const ids = mine.filter((c) => c.optionId === o.id).map((c) => c.studentId);
+        if (!ids.length) continue;
+        trackSources.push({
+          key: `t${t.id}o${o.id}`,
+          semester,
+          trackName: t.name,
+          optionName: o.name,
+          memberIds: ids,
+        });
+      }
+    }
+  }
+
   return (
     <RegisterManager
       yearLabel={`ปีการศึกษา ${year.year}`}
@@ -125,6 +166,7 @@ export default async function RegisterPage() {
       sections={items}
       students={students as PickStudent[]}
       studentGroups={studentGroups}
+      trackSources={trackSources}
     />
   );
 }

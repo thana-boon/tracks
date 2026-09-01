@@ -18,6 +18,7 @@ import {
   TableProperties,
   MapPin,
   Loader2,
+  Route,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -88,6 +89,21 @@ export interface StudentGroup {
   memberIds: number[];
 }
 
+/**
+ * A สายการเรียน of this ปีการศึกษา, offered as a ready-made selection.
+ *
+ * One entry per สาย and one per ข้อย่อย, each already narrowed to นักเรียน who
+ * are still studying — the register screen only has to drop the ids in.
+ */
+export interface TrackSource {
+  key: string;
+  semester: number;
+  trackName: string;
+  /** set when the entry is one แขนง rather than the whole สาย */
+  optionName: string | null;
+  memberIds: number[];
+}
+
 /** What the editor is working on: a brand-new รอบ, or an existing one. */
 type Draft = { mode: 'create' } | { mode: 'edit'; section: RegisterSection };
 
@@ -98,6 +114,7 @@ export function RegisterManager({
   sections,
   students,
   studentGroups,
+  trackSources,
 }: {
   yearLabel: string;
   groups: RegisterGroup[];
@@ -105,6 +122,7 @@ export function RegisterManager({
   sections: RegisterSection[];
   students: PickStudent[];
   studentGroups: StudentGroup[];
+  trackSources: TrackSource[];
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const router = useRouter();
@@ -154,6 +172,7 @@ export function RegisterManager({
           sections={sections}
           students={students}
           studentGroups={studentGroups}
+          trackSources={trackSources}
           onDone={afterSave}
           onCancel={() => setDraft(null)}
         />
@@ -620,6 +639,7 @@ function SectionEditor({
   sections,
   students,
   studentGroups,
+  trackSources,
   onDone,
   onCancel,
 }: {
@@ -629,6 +649,7 @@ function SectionEditor({
   sections: RegisterSection[];
   students: PickStudent[];
   studentGroups: StudentGroup[];
+  trackSources: TrackSource[];
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -671,13 +692,28 @@ function SectionEditor({
     [studentGroups, selected],
   );
 
+  // The สาย the ticked roster is exactly, if any — read the same way as
+  // matchedGroup, so a กลุ่ม pulled straight off a Track chip gets named after
+  // the สาย instead of after its first วันเรียน.
+  const matchedTrack = useMemo(
+    () =>
+      trackSources.find(
+        (t) =>
+          t.memberIds.length > 0 &&
+          t.memberIds.length === selected.size &&
+          t.memberIds.every((id) => selected.has(id)),
+      ) ?? null,
+    [trackSources, selected],
+  );
+
   /** What the server will call this กลุ่ม if the name is left blank. */
   const autoLabel = useMemo(() => {
     if (matchedGroup) return matchedGroup.name;
+    if (matchedTrack) return trackSourceLabel(matchedTrack);
     if (dates.length === 1) return thaiDateShort(dates[0]);
     if (dates.length > 1) return `${thaiDateShort(dates[0])} +${dates.length - 1}`;
     return 'กลุ่มที่ 1';
-  }, [matchedGroup, dates]);
+  }, [matchedGroup, matchedTrack, dates]);
 
   /** Is there anything in here that บันทึก has not been pressed on yet? */
   const dirty =
@@ -909,6 +945,12 @@ function SectionEditor({
               onSaveAsGroup={() => setNaming(true)}
             />
 
+            {trackSources.length ? (
+              <div className="mt-3">
+                <TrackPicker sources={trackSources} selected={selected} onBulk={bulk} />
+              </div>
+            ) : null}
+
             <div className="mt-3">
               <StudentPicker
                 students={students}
@@ -929,6 +971,103 @@ function SectionEditor({
 
       {naming ? <NewGroupModal studentIds={[...selected]} onClose={() => setNaming(false)} /> : null}
     </Modal>
+  );
+}
+
+/** "TrackSM · กฎหมาย" — what a สาย or one of its แขนง is called on a chip. */
+export function trackSourceLabel(t: TrackSource): string {
+  return t.optionName ? `${t.trackName} · ${t.optionName}` : t.trackName;
+}
+
+/**
+ * ดึงรายชื่อจาก Track — the นักเรียน of one สายการเรียน, dropped into the
+ * roster in one press.
+ *
+ * The whole point of the screen above this one is that นักเรียน choose their
+ * own สาย; re-ticking those same forty names by hand here is work the school
+ * has already done. Additive like the กลุ่มเรียนพิเศษ chips, and pressing a
+ * chip whose people are all already ticked takes them out again — so a wrong
+ * chip costs one more press, not a rebuilt list.
+ */
+function TrackPicker({
+  sources,
+  selected,
+  onBulk,
+}: {
+  sources: TrackSource[];
+  selected: Set<number>;
+  onBulk: (ids: number[], select: boolean) => void;
+}) {
+  const semesters = useMemo(
+    () => [...new Set(sources.map((s) => s.semester))].sort((a, b) => a - b),
+    [sources],
+  );
+  // Opens on the latest ภาคเรียน that has anybody in it — the term being set
+  // up is almost always the newest one, and the label says which either way.
+  const [semester, setSemester] = useState(() => semesters[semesters.length - 1] ?? 1);
+  const shown = sources.filter((s) => s.semester === semester);
+
+  return (
+    <div className="rounded-xl border border-border bg-secondary/30 p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Route className="size-4.5 text-muted-foreground" strokeWidth={1.8} />
+          ดึงรายชื่อจาก Track
+        </div>
+        {semesters.length > 1 ? (
+          <Select
+            value={semester}
+            onChange={(e) => setSemester(Number(e.target.value))}
+            className="h-9 w-36"
+            aria-label="ภาคเรียนของ Track"
+          >
+            {semesters.map((s) => (
+              <option key={s} value={s}>
+                ภาคเรียนที่ {s}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <Badge tone="secondary">ภาคเรียนที่ {semester}</Badge>
+        )}
+      </div>
+
+      {shown.length === 0 ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          ยังไม่มีนักเรียนเลือก Track ในภาคเรียนที่ {semester}
+        </p>
+      ) : (
+        <ul className="mt-3 flex flex-wrap gap-2">
+          {shown.map((t) => {
+            const all = t.memberIds.every((id) => selected.has(id));
+            return (
+              <li key={t.key}>
+                <button
+                  type="button"
+                  onClick={() => onBulk(t.memberIds, !all)}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
+                    all
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-card hover:bg-secondary/60',
+                  )}
+                >
+                  {trackSourceLabel(t)}
+                  <span
+                    className={cn(
+                      'tabular-nums',
+                      all ? 'text-primary-foreground/70' : 'text-muted-foreground',
+                    )}
+                  >
+                    {t.memberIds.length}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 
