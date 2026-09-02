@@ -17,8 +17,8 @@ import {
   Textarea,
 } from '@/components/ui';
 import { Modal, useDialog } from '@/components/dialog';
-import { GRADE_LEVELS, SEMESTERS, type Term } from '@/lib/track-core';
-import { cn } from '@/lib/utils';
+import { GRADE_LEVELS, SEMESTERS, trackWindow, type Term } from '@/lib/track-core';
+import { cn, fromSchoolDateTimeInput, thaiDateTimeLongOf, toSchoolDateTimeInput } from '@/lib/utils';
 import { deleteTrack, saveTrack, toggleTrack } from './actions';
 
 export interface ManagerOption {
@@ -34,9 +34,52 @@ export interface ManagerTrack {
   name: string;
   description: string | null;
   gradeLevels: string[];
+  /** ISO instants, null on a side that is not fenced */
+  opensAt: string | null;
+  closesAt: string | null;
   active: boolean;
   options: ManagerOption[];
   chosenCount: number;
+}
+
+/**
+ * The one-line reading of a Track's ช่วงเวลา, for the list.
+ *
+ * Rendered from the row rather than stored: the state is a fact about the
+ * clock, and a badge that had been saved at create time would go on saying
+ * "ยังไม่เปิด" a month after it opened.
+ */
+function windowBadge(t: ManagerTrack): { tone: 'secondary' | 'primary' | 'navy'; text: string } | null {
+  if (!t.opensAt && !t.closesAt) return null;
+  const w = trackWindow(t);
+  const opens = thaiDateTimeLongOf(w.opensAt);
+  const closes = thaiDateTimeLongOf(w.closesAt);
+  if (w.state === 'before') return { tone: 'secondary', text: `เปิดให้เลือก ${opens} น.` };
+  if (w.state === 'after') return { tone: 'secondary', text: `ปิดรับแล้ว ${closes} น.` };
+  return {
+    tone: 'primary',
+    text: closes ? `เปิดถึง ${closes} น.` : `เปิดตั้งแต่ ${opens} น.`,
+  };
+}
+
+/**
+ * What the two boxes currently say, in a sentence — including the two blank
+ * ones, because "ไม่กำหนดเวลา" is a real setting an admin can arrive at by
+ * clearing a field and needs to see confirmed before they save.
+ */
+function windowHint(opensAt: string, closesAt: string): string {
+  const opens = thaiDateTimeLongOf(fromSchoolDateTimeInput(opensAt));
+  const closes = thaiDateTimeLongOf(fromSchoolDateTimeInput(closesAt));
+  if (opensAt && !opens) return 'เวลาเปิดให้เลือกไม่ถูกต้อง';
+  if (closesAt && !closes) return 'เวลาปิดรับไม่ถูกต้อง';
+  if (!opens && !closes) return 'เว้นว่างทั้งคู่ = เปิดให้เลือกตลอด จนกว่าจะกดปิดไม่ให้เลือก';
+  if (opens && closes)
+    return fromSchoolDateTimeInput(closesAt)! <= fromSchoolDateTimeInput(opensAt)!
+      ? 'เวลาปิดรับต้องอยู่หลังเวลาเปิดให้เลือก'
+      : `นักเรียนเลือกได้ ${opens} น. ถึง ${closes} น.`;
+  return opens
+    ? `นักเรียนเลือกได้ตั้งแต่ ${opens} น. เป็นต้นไป`
+    : `นักเรียนเลือกได้จนถึง ${closes} น.`;
 }
 
 export interface YearOption {
@@ -157,6 +200,10 @@ export function TracksManager({
                       {t.gradeLevels.length ? t.gradeLevels.join(' · ') : 'ทุกระดับชั้น'}
                     </Badge>
                     <Badge tone="primary">เลือกแล้ว {t.chosenCount} คน</Badge>
+                    {(() => {
+                      const w = windowBadge(t);
+                      return w ? <Badge tone={w.tone}>{w.text}</Badge> : null;
+                    })()}
                   </div>
                   {t.description ? (
                     <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
@@ -239,6 +286,12 @@ function TrackForm({
   const [name, setName] = useState(track?.name ?? '');
   const [description, setDescription] = useState(track?.description ?? '');
   const [grades, setGrades] = useState<string[]>(track?.gradeLevels ?? []);
+  const [opensAt, setOpensAt] = useState(
+    toSchoolDateTimeInput(track?.opensAt ? new Date(track.opensAt) : null),
+  );
+  const [closesAt, setClosesAt] = useState(
+    toSchoolDateTimeInput(track?.closesAt ? new Date(track.closesAt) : null),
+  );
   const [options, setOptions] = useState<DraftOption[]>(
     (track?.options ?? []).map((o) => ({
       key: `o${o.id}`,
@@ -273,6 +326,8 @@ function TrackForm({
       name,
       description,
       gradeLevels: grades,
+      opensAt,
+      closesAt,
       options: options
         .filter((o) => o.name.trim())
         .map((o) => ({ id: o.id, name: o.name, description: o.description })),
@@ -368,6 +423,36 @@ function TrackForm({
           <p className="mt-1.5 text-xs text-muted-foreground">
             ไม่เลือกเลย = เปิดให้ทุกระดับชั้น
           </p>
+        </div>
+
+        <div className="rounded-xl border border-border p-3.5">
+          <p className="text-sm font-medium">ช่วงเวลาที่เปิดให้เลือก (ไม่บังคับ)</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            เวลาโรงเรียน — นักเรียนจะกดเลือกได้เฉพาะในช่วงนี้ ส่วนผู้ดูแลยังเพิ่ม แก้ไข
+            และลบได้ตลอดเวลา
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="t-opens">เปิดให้เลือก</Label>
+              <Input
+                id="t-opens"
+                type="datetime-local"
+                value={opensAt}
+                onChange={(e) => setOpensAt(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="t-closes">ปิดรับ</Label>
+              <Input
+                id="t-closes"
+                type="datetime-local"
+                value={closesAt}
+                min={opensAt || undefined}
+                onChange={(e) => setClosesAt(e.target.value)}
+              />
+            </div>
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">{windowHint(opensAt, closesAt)}</p>
         </div>
 
         <div>

@@ -8,7 +8,8 @@ import { academicYears, people, trackChoices, trackOptions, tracks } from '@/db/
 import { actorOf, requireRole } from '@/lib/authz';
 import { logActivity } from '@/lib/log';
 import { optionProblem } from '@/lib/tracks';
-import { GRADE_LEVELS, SEMESTERS, trackAllows } from '@/lib/track-core';
+import { GRADE_LEVELS, SEMESTERS, trackAllows, trackWindow } from '@/lib/track-core';
+import { fromSchoolDateTimeInput, thaiDateTimeLongOf } from '@/lib/utils';
 import type { ActionResult } from '@/components/action-button';
 
 const OptionInput = z.object({
@@ -24,6 +25,9 @@ const TrackInput = z.object({
   name: z.string().trim().min(1, 'กรอกชื่อ Track').max(120),
   description: z.string().trim().max(500).optional().default(''),
   gradeLevels: z.array(z.string().trim()).max(GRADE_LEVELS.length),
+  /** "YYYY-MM-DDTHH:MM" in school time, or '' for "ไม่กำหนด" on that side */
+  opensAt: z.string().trim().max(32).optional().default(''),
+  closesAt: z.string().trim().max(32).optional().default(''),
   options: z.array(OptionInput).max(30),
 });
 
@@ -45,6 +49,16 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
   if (!parsed.success)
     return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
   const { yearId, semester, name, description, gradeLevels, options } = parsed.data;
+
+  // ช่วงเวลาเปิด-ปิด. Either side may be left blank — an unfenced side means
+  // "ไม่กำหนด", not "now". A blank string has to survive as null rather than
+  // become an Invalid Date, so the parse and the emptiness test are one step.
+  const opensAt = parsed.data.opensAt ? fromSchoolDateTimeInput(parsed.data.opensAt) : null;
+  const closesAt = parsed.data.closesAt ? fromSchoolDateTimeInput(parsed.data.closesAt) : null;
+  if (parsed.data.opensAt && !opensAt) return { ok: false, message: 'เวลาเปิดให้เลือกไม่ถูกต้อง' };
+  if (parsed.data.closesAt && !closesAt) return { ok: false, message: 'เวลาปิดรับไม่ถูกต้อง' };
+  if (opensAt && closesAt && closesAt <= opensAt)
+    return { ok: false, message: 'เวลาปิดรับต้องอยู่หลังเวลาเปิดให้เลือก' };
 
   const wantedGrades = [...new Set(gradeLevels)];
   const grades = wantedGrades.filter((g) => (GRADE_LEVELS as readonly string[]).includes(g));
@@ -111,12 +125,28 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
       if (trackId) {
         await tx
           .update(tracks)
-          .set({ yearId, semester, name, description: description || null, gradeLevels: grades })
+          .set({
+            yearId,
+            semester,
+            name,
+            description: description || null,
+            gradeLevels: grades,
+            opensAt,
+            closesAt,
+          })
           .where(eq(tracks.id, trackId));
       } else {
         const [created] = await tx
           .insert(tracks)
-          .values({ yearId, semester, name, description: description || null, gradeLevels: grades })
+          .values({
+            yearId,
+            semester,
+            name,
+            description: description || null,
+            gradeLevels: grades,
+            opensAt,
+            closesAt,
+          })
           .returning({ id: tracks.id });
         trackId = created.id;
       }
@@ -168,16 +198,27 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
     year: year.year,
     semester,
     gradeLevels: grades,
+    opensAt: opensAt?.toISOString(),
+    closesAt: closesAt?.toISOString(),
     options: options.length,
     removedOptions: removed,
   });
   revalidatePath('/admin/tracks');
   revalidatePath('/admin/tracks/students');
+  // The window is read back in the toast rather than assumed: an admin who
+  // mistyped the year finds out here, not when นักเรียน cannot get in.
+  const windowNote = opensAt
+    ? closesAt
+      ? ` — เปิดให้เลือก ${thaiDateTimeLongOf(opensAt)} ถึง ${thaiDateTimeLongOf(closesAt)}`
+      : ` — เปิดให้เลือก ${thaiDateTimeLongOf(opensAt)} เป็นต้นไป`
+    : closesAt
+      ? ` — เปิดให้เลือกถึง ${thaiDateTimeLongOf(closesAt)}`
+      : '';
   return {
     ok: true,
     message: `${id ? 'แก้ไข' : 'สร้าง'} “${name}” แล้ว${
       options.length ? ` — ข้อย่อย ${options.length} รายการ` : ''
-    }`,
+    }${windowNote}`,
   };
 }
 
@@ -293,6 +334,14 @@ export async function setStudentChoice(form: z.infer<typeof ChoiceInput>): Promi
       semester,
       offGrade: offGrade || undefined,
       inactiveTrack: !track.active || undefined,
+      outsideWindow:
+        trackWindow(
+          {
+            active: track.active,
+            opensAt: track.opensAt?.toISOString() ?? null,
+            closesAt: track.closesAt?.toISOString() ?? null,
+          },
+        ).state !== 'open' || undefined,
     },
   );
   revalidatePath('/admin/tracks/students');

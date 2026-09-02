@@ -8,7 +8,8 @@ import { people, trackChoices, tracks } from '@/db/schema';
 import { actorOf, requireRole } from '@/lib/authz';
 import { logActivity } from '@/lib/log';
 import { latestTerm, optionProblem } from '@/lib/tracks';
-import { SEMESTERS, trackAllows } from '@/lib/track-core';
+import { SEMESTERS, trackAllows, trackWindow } from '@/lib/track-core';
+import { thaiDateTimeLongOf } from '@/lib/utils';
 import type { ActionResult } from '@/components/action-button';
 
 const ChooseInput = z.object({
@@ -55,6 +56,32 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
   if (track.yearId !== yearId || track.semester !== semester)
     return { ok: false, message: 'Track นี้ไม่ได้อยู่ในภาคเรียนที่เปิดให้เลือก' };
   if (!track.active) return { ok: false, message: `“${track.name}” ปิดไม่ให้เลือกแล้ว` };
+
+  // ช่วงเวลาเปิด-ปิด. Checked here and not only on the screen: the window is the
+  // school's deadline, and a tab left open since before it closed would
+  // otherwise post a choice through it. The refusal names the time so a
+  // นักเรียน who is early knows when to come back rather than only that they
+  // cannot.
+  const timing = trackWindow(
+    {
+      active: track.active,
+      opensAt: track.opensAt?.toISOString() ?? null,
+      closesAt: track.closesAt?.toISOString() ?? null,
+    },
+    new Date(),
+  );
+  if (timing.state === 'before')
+    return {
+      ok: false,
+      message: `“${track.name}” ยังไม่เปิดให้เลือก — เปิด ${thaiDateTimeLongOf(timing.opensAt)} น.`,
+    };
+  if (timing.state === 'after')
+    return {
+      ok: false,
+      message: `หมดเวลาเลือก “${track.name}” แล้ว (ปิดรับ ${thaiDateTimeLongOf(
+        timing.closesAt,
+      )} น.) — ติดต่อผู้ดูแลระบบ`,
+    };
   if (!trackAllows({ gradeLevels: track.gradeLevels ?? [] }, student.gradeLevel))
     return { ok: false, message: `“${track.name}” ไม่ได้เปิดให้ ${student.gradeLevel ?? 'ระดับชั้นของคุณ'}` };
 

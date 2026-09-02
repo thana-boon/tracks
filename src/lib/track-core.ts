@@ -43,8 +43,50 @@ export interface TrackRow {
   name: string;
   description: string | null;
   gradeLevels: string[];
+  /** ISO instants, or null for "not fenced on that side" */
+  opensAt: string | null;
+  closesAt: string | null;
   active: boolean;
   options: TrackOptionRow[];
+}
+
+/**
+ * ช่วงเวลาเปิดให้เลือก — where a Track stands against the clock right now.
+ *
+ * 'closed' is the ผู้ดูแล's switch and outranks the clock: a สาย turned off is
+ * off whatever the window says, and saying so in one word keeps the นักเรียน
+ * screen from promising "เปิด 1 มิ.ย." for something that will not open.
+ */
+export type TrackWindowState = 'closed' | 'before' | 'open' | 'after';
+
+export interface TrackWindow {
+  state: TrackWindowState;
+  opensAt: Date | null;
+  closesAt: Date | null;
+}
+
+export function trackWindow(
+  track: { opensAt: string | null; closesAt: string | null; active: boolean },
+  now: Date = new Date(),
+): TrackWindow {
+  const opensAt = track.opensAt ? new Date(track.opensAt) : null;
+  const closesAt = track.closesAt ? new Date(track.closesAt) : null;
+  const state: TrackWindowState = !track.active
+    ? 'closed'
+    : opensAt && now < opensAt
+      ? 'before'
+      : closesAt && now >= closesAt
+        ? 'after'
+        : 'open';
+  return { state, opensAt, closesAt };
+}
+
+/** Whether a นักเรียน may choose this สาย at this moment — the switch and the clock together. */
+export function trackChoosable(
+  track: { opensAt: string | null; closesAt: string | null; active: boolean },
+  now: Date = new Date(),
+): boolean {
+  return trackWindow(track, now).state === 'open';
 }
 
 /** Whether a student of this ชั้น may choose the track. Empty list = every ชั้น. */

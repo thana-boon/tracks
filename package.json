@@ -11,7 +11,7 @@
     "start": "next start -p 3004 -H 0.0.0.0",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/evaluate.test.ts src/lib/attendance-summary.test.ts src/lib/session-core.test.ts src/lib/session-end.test.ts src/lib/password.test.ts src/lib/render-queue.test.ts src/lib/track-grades.test.ts src/lib/class-order.test.ts src/lib/xlsx.test.ts src/lib/track-report.test.ts",
+    "test": "tsx --test src/lib/evaluate.test.ts src/lib/attendance-summary.test.ts src/lib/session-core.test.ts src/lib/session-end.test.ts src/lib/password.test.ts src/lib/render-queue.test.ts src/lib/track-grades.test.ts src/lib/track-window.test.ts src/lib/class-order.test.ts src/lib/xlsx.test.ts src/lib/track-report.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit migrate",

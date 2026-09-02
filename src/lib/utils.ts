@@ -135,6 +135,32 @@ export function toSchoolTime(d: Date | null | undefined): string {
   }).format(d);
 }
 
+/**
+ * "YYYY-MM-DDTHH:MM" for an `<input type="datetime-local">`, read in school
+ * time — the value an admin sees is the wall clock on the school's wall,
+ * whatever timezone the browser they typed it in happens to be set to.
+ */
+export function toSchoolDateTimeInput(d: Date | null | undefined): string {
+  if (!d) return '';
+  const date = toSchoolDate(d);
+  return date ? `${date}T${toSchoolTime(d)}` : '';
+}
+
+/**
+ * The instant a "YYYY-MM-DDTHH:MM" from that input names, read as school time.
+ *
+ * The +07:00 is written out rather than left to `new Date(s)`, which would read
+ * the string against the *server's* clock: a container in UTC would file
+ * "08:00 น." as 15:00 น. school time and open the เลือก Track screen seven
+ * hours late. Asia/Bangkok has no DST, so the offset is a constant.
+ */
+export function fromSchoolDateTimeInput(s: string | null | undefined): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(s ?? '').trim());
+  if (!m) return null;
+  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+07:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export const THAI_MONTHS = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',

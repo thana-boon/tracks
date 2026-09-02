@@ -13,6 +13,8 @@ function track(id: number, name: string, options: string[] = [], active = true):
     name,
     description: null,
     gradeLevels: [],
+    opensAt: null,
+    closesAt: null,
     active,
     options: options.map((o, i) => ({
       id: id * 100 + i,

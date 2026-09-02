@@ -2,12 +2,18 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, History, Lock, Route } from 'lucide-react';
+import { CalendarClock, CheckCircle2, History, Lock, Route } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge, Button, Card, CardHeader, EmptyState, Select } from '@/components/ui';
 import { useDialog } from '@/components/dialog';
-import { termLabel, type Term, type TrackRow } from '@/lib/track-core';
-import { cn } from '@/lib/utils';
+import {
+  termLabel,
+  trackWindow,
+  type Term,
+  type TrackRow,
+  type TrackWindow,
+} from '@/lib/track-core';
+import { cn, thaiDateTimeLongOf } from '@/lib/utils';
 import { chooseTrack } from './actions';
 
 export interface MyChoice {
@@ -25,7 +31,18 @@ export interface HistoryRow {
   optionName: string | null;
 }
 
+/**
+ * The line under a สาย's name that says where it stands against the clock —
+ * empty for one with no window at all, which needs no explanation.
+ */
+function windowNote(w: TrackWindow): string {
+  if (w.state === 'before') return `เปิดให้เลือก ${thaiDateTimeLongOf(w.opensAt)} น.`;
+  if (w.state === 'after') return `หมดเวลาเลือกแล้ว — ปิดรับ ${thaiDateTimeLongOf(w.closesAt)} น.`;
+  return w.closesAt ? `เลือกได้ถึง ${thaiDateTimeLongOf(w.closesAt)} น.` : '';
+}
+
 export function TrackChooser({
+  now,
   term,
   terms,
   openTerm,
@@ -35,6 +52,8 @@ export function TrackChooser({
   choice,
   history,
 }: {
+  /** the server's clock at render — see the note where the page reads it */
+  now: string;
   term: Term;
   terms: Term[];
   openTerm: Term;
@@ -52,13 +71,21 @@ export function TrackChooser({
 
   const selected = tracks.find((t) => t.id === trackId) ?? null;
 
+  // ช่วงเวลาเปิด-ปิด, once per render for every สาย. A Track outside its window
+  // is shown rather than hidden: "TrackSM เปิด 1 มิถุนายน" is the answer a
+  // นักเรียน came to the page for, and an empty screen is not.
+  const at = new Date(now);
+  const windows = new Map(tracks.map((t) => [t.id, trackWindow(t, at)]));
+  const selectedOpen = selected ? windows.get(selected.id)?.state === 'open' : false;
+  const anyOpen = tracks.some((t) => windows.get(t.id)?.state === 'open');
+
   function gotoTerm(value: string) {
     const [yearId, semester] = value.split(':');
     router.push(`/student/track?year=${yearId}&semester=${semester}`);
   }
 
   async function submit() {
-    if (saving || !selected) return;
+    if (saving || !selected || !selectedOpen) return;
     if (selected.options.length && !optionId) {
       toast.error(`เลือกข้อย่อยของ “${selected.name}” ด้วย`);
       return;
@@ -163,18 +190,26 @@ export function TrackChooser({
           />
           <ul className="space-y-2.5 px-4 pb-4 sm:px-5">
             {tracks.map((t) => {
+              const w = windows.get(t.id)!;
+              const shut = w.state !== 'open';
+              const note = windowNote(w);
               const on = t.id === trackId;
               return (
                 <li key={t.id}>
                   <button
                     type="button"
+                    disabled={shut}
                     onClick={() => {
                       setTrackId(t.id);
                       if (t.id !== trackId) setOptionId(null);
                     }}
                     className={cn(
                       'w-full rounded-xl border px-4 py-3.5 text-left transition-colors',
-                      on ? 'border-primary bg-primary/5' : 'border-border hover:bg-secondary/50',
+                      shut
+                        ? 'cursor-not-allowed border-border bg-secondary/30 opacity-70'
+                        : on
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:bg-secondary/50',
                     )}
                   >
                     <div className="flex flex-wrap items-center gap-2">
@@ -186,9 +221,15 @@ export function TrackChooser({
                     {t.description ? (
                       <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
                     ) : null}
+                    {note ? (
+                      <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <CalendarClock className="size-3.5 shrink-0" strokeWidth={1.8} />
+                        {note}
+                      </p>
+                    ) : null}
                   </button>
 
-                  {on && t.options.length ? (
+                  {on && !shut && t.options.length ? (
                     <ul className="mt-2 space-y-2 pl-4">
                       {t.options.map((o) => {
                         const picked = o.id === optionId;
@@ -222,9 +263,11 @@ export function TrackChooser({
           </ul>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
             <p className="text-xs text-muted-foreground">
-              ตรวจสอบให้แน่ใจก่อนกดยืนยัน — เลือกได้ครั้งเดียว
+              {anyOpen
+                ? 'ตรวจสอบให้แน่ใจก่อนกดยืนยัน — เลือกได้ครั้งเดียว'
+                : 'ยังไม่ถึงเวลาเลือก หรือหมดเวลาแล้ว — ดูวันเวลาที่แต่ละ Track'}
             </p>
-            <Button onClick={submit} disabled={saving || !selected}>
+            <Button onClick={submit} disabled={saving || !selected || !selectedOpen}>
               ยืนยันการเลือก
             </Button>
           </div>

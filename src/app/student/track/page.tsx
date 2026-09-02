@@ -59,6 +59,12 @@ export default async function StudentTrackPage({
   const gradeLevel = student?.gradeLevel ?? null;
   const offered = available.filter((t) => trackAllows(t, gradeLevel));
 
+  // The clock is read once, on the server, and handed down: the chooser renders
+  // "ยังไม่เปิด / ปิดรับแล้ว" off it, and a client reading its own `new Date()`
+  // would disagree with the server it was rendered on — and with the action
+  // that has the final say — by whatever the device's clock is out by.
+  const now = new Date().toISOString();
+
   // The switcher lists every ภาคเรียน that has Tracks; before the first one
   // exists there is still the open term to name.
   const termOptions = terms.length ? terms : [open];
@@ -79,6 +85,7 @@ export default async function StudentTrackPage({
       </section>
 
       <TrackChooser
+        now={now}
         term={term}
         terms={termOptions}
         openTerm={open}

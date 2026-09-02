@@ -43,6 +43,13 @@
       "when": 1788256880391,
       "tag": "0005_tracks",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788311710219,
+      "tag": "0006_track_window",
+      "breakpoints": true
     }
   ]
 }

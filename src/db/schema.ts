@@ -384,6 +384,14 @@ export const tracks = pgTable(
     description: text('description'),
     /** ระดับชั้นที่เลือกสายนี้ได้ — ["ม.4","ม.5"]; empty means every ชั้น */
     gradeLevels: jsonb('grade_levels').$type<string[]>().notNull().default([]),
+    /**
+     * ช่วงเวลาที่เปิดให้นักเรียนเลือก — null on either side means that side is
+     * not fenced: no opensAt is "open from the moment it exists", no closesAt
+     * is "open until ปิดไม่ให้เลือก". The window only ever governs the
+     * นักเรียน's own screen; a ผู้ดูแล edits and places students at any hour.
+     */
+    opensAt: timestamp('opens_at'),
+    closesAt: timestamp('closes_at'),
     active: boolean('active').notNull().default(true),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },

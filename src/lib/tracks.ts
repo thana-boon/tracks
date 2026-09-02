@@ -104,6 +104,8 @@ export async function tracksForTerm(
     name: t.name,
     description: t.description,
     gradeLevels: t.gradeLevels ?? [],
+    opensAt: t.opensAt?.toISOString() ?? null,
+    closesAt: t.closesAt?.toISOString() ?? null,
     active: t.active,
     options: byTrack.get(t.id) ?? [],
   }));
