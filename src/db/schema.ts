@@ -160,12 +160,21 @@ export const trackSubjects = pgTable(
     description: text('description'),
     /** ครูผู้สอน — free text; the teacher need not exist in SchoolOS */
     teacherName: text('teacher_name'),
+    /**
+     * ช่วงที่วิชานี้เปิดสอน — ภาคเรียน (1|2) และช่วงในภาคเรียนนั้น (1|2), so a
+     * year holds four ช่วง in all. Both are null together for a วิชา nobody has
+     * placed yet: the catalogue predates the ช่วง, and an unplaced วิชา has to
+     * keep showing up (under “ยังไม่ระบุช่วง”) rather than quietly vanish.
+     */
+    semester: integer('semester'),
+    phase: integer('phase'),
     active: boolean('active').notNull().default(true),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex('track_subjects_code_uq').on(t.code),
     index('track_subjects_group_idx').on(t.groupId),
+    index('track_subjects_phase_idx').on(t.semester, t.phase),
   ],
 );
 

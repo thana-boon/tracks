@@ -15,6 +15,8 @@ export default async function SubjectsPage() {
         teacherName: trackSubjects.teacherName,
         description: trackSubjects.description,
         active: trackSubjects.active,
+        semester: trackSubjects.semester,
+        phase: trackSubjects.phase,
         groupId: trackSubjects.groupId,
         groupCode: trackGroups.code,
         groupName: trackGroups.name,
@@ -24,7 +26,12 @@ export default async function SubjectsPage() {
       .innerJoin(trackGroups, eq(trackSubjects.groupId, trackGroups.id))
       .leftJoin(registrations, eq(registrations.subjectId, trackSubjects.id))
       .groupBy(trackSubjects.id, trackGroups.code, trackGroups.name)
-      .orderBy(asc(trackGroups.code), asc(trackSubjects.code)),
+      .orderBy(
+        asc(trackGroups.code),
+        sql`${trackSubjects.semester} nulls last`,
+        sql`${trackSubjects.phase} nulls last`,
+        asc(trackSubjects.code),
+      ),
     db
       .select({ id: trackGroups.id, code: trackGroups.code, name: trackGroups.name })
       .from(trackGroups)

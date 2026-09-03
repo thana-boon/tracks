@@ -21,6 +21,7 @@ const ACTION_LABEL: Record<string, string> = {
   create_subject: 'เพิ่มวิชา',
   update_subject: 'แก้ไขวิชา',
   delete_subject: 'ลบวิชา',
+  set_subject_phase: 'ย้ายช่วงวิชา',
   enable_subject: 'เปิดใช้งานวิชา',
   disable_subject: 'ปิดใช้งานวิชา',
   create_classroom: 'เพิ่มห้องเรียนพิเศษ',
