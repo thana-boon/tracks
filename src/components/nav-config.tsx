@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   CalendarDays,
+  CalendarRange,
   RefreshCw,
   FolderKanban,
   BookOpen,
@@ -53,7 +54,7 @@ export function itemsOf(entry: NavEntry): NavItem[] {
 const sw = 1.7;
 
 /**
- * An admin has eighteen screens, which is a scroll rather than a menu when
+ * An admin has nineteen screens, which is a scroll rather than a menu when
  * laid out flat. They group cleanly by *when in the year they are used*: set the
  * year up, take attendance through it, read the results out, and the handful of
  * caretaker screens that are nobody's daily work. Only ภาพรวม stays loose at the
@@ -76,6 +77,7 @@ export function navFor(role: AppRole): NavEntry[] {
           { href: '/admin/subjects', label: 'วิชาเสริม', icon: <BookOpen className="size-5" strokeWidth={sw} /> },
           { href: '/admin/classrooms', label: 'ห้องเรียนพิเศษ', icon: <School className="size-5" strokeWidth={sw} /> },
           { href: '/admin/register', label: 'จัดนักเรียนเข้าวิชา', icon: <ClipboardPen className="size-5" strokeWidth={sw} /> },
+          { href: '/admin/schedule', label: 'ตารางเรียนทั้งปี', icon: <CalendarRange className="size-5" strokeWidth={sw} /> },
         ],
       },
       {

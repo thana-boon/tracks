@@ -30,6 +30,12 @@ const ACTION_LABEL: Record<string, string> = {
   set_classroom_members: 'ตั้งสมาชิกห้อง',
   set_meeting_days: 'ตั้งวันเรียน',
   set_assignments: 'จัดนักเรียนเข้าวิชา',
+  create_section: 'เพิ่มกลุ่มเรียน',
+  update_section: 'แก้ไขกลุ่มเรียน',
+  delete_section: 'ลบกลุ่มเรียน',
+  add_class_dates: 'เพิ่มวันเรียนในตาราง',
+  remove_class_date: 'เอาวันเรียนออกจากตาราง',
+  move_class_date: 'ย้ายวันเรียน',
   save_attendance: 'บันทึกเช็คชื่อ',
   create_backup: 'สำรองข้อมูล',
   delete_backup: 'ลบไฟล์สำรอง',
@@ -37,7 +43,7 @@ const ACTION_LABEL: Record<string, string> = {
   restore_upload: 'กู้คืนจากไฟล์อัปโหลด',
 };
 
-const DESTRUCTIVE = new Set(['delete_group', 'delete_subject', 'delete_classroom', 'delete_backup', 'restore_backup', 'restore_upload']);
+const DESTRUCTIVE = new Set(['delete_group', 'delete_subject', 'delete_classroom', 'delete_section', 'remove_class_date', 'delete_backup', 'restore_backup', 'restore_upload']);
 
 export default async function LogsPage() {
   const rows = await db
