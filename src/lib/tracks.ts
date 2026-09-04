@@ -1,10 +1,24 @@
 import 'server-only';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
-import { academicYears, people, trackChoices, trackOptions, tracks } from '@/db/schema';
+import {
+  academicYears,
+  people,
+  trackChoices,
+  trackGroups,
+  trackOptions,
+  trackSubjects,
+  tracks,
+} from '@/db/schema';
 import { activeYear } from './years';
-import type { Term, TrackOptionRow, TrackRow } from './track-core';
-import { isSemester } from './track-core';
+import type {
+  GroupCatalogRow,
+  Term,
+  TrackOptionRow,
+  TrackRow,
+  TrackSubjectRow,
+} from './track-core';
+import { isSemester, subjectInTrack } from './track-core';
 import { buildTrackReport, type ReportStudent, type TrackReport } from './track-report';
 
 /**
@@ -61,15 +75,39 @@ export async function resolveTerm(
   return latestTerm();
 }
 
-/** Tracks defined for one ภาคเรียน, each with its ข้อย่อย. */
+/**
+ * Tracks defined for one ภาคเรียน — each with its ข้อย่อย and with the วิชา a
+ * นักเรียน would get by choosing it.
+ *
+ * The วิชา come along rather than being fetched when the detail panel opens:
+ * "ถ้าเลือกสายนี้จะได้เรียนอะไร" is the question the screen exists to answer,
+ * and one extra query for every สาย a student taps through would answer it
+ * slower for no gain — a ภาคเรียน holds a handful of สาย, not hundreds.
+ */
 export async function tracksForTerm(
   yearId: number,
   semester: number,
   opts: { activeOnly?: boolean } = {},
 ): Promise<TrackRow[]> {
   const rows = await db
-    .select()
+    .select({
+      id: tracks.id,
+      yearId: tracks.yearId,
+      semester: tracks.semester,
+      groupId: tracks.groupId,
+      groupCode: trackGroups.code,
+      groupName: trackGroups.name,
+      phase: tracks.phase,
+      name: tracks.name,
+      description: tracks.description,
+      admissionNote: tracks.admissionNote,
+      gradeLevels: tracks.gradeLevels,
+      opensAt: tracks.opensAt,
+      closesAt: tracks.closesAt,
+      active: tracks.active,
+    })
     .from(tracks)
+    .leftJoin(trackGroups, eq(tracks.groupId, trackGroups.id))
     .where(
       opts.activeOnly
         ? and(eq(tracks.yearId, yearId), eq(tracks.semester, semester), eq(tracks.active, true))
@@ -79,20 +117,74 @@ export async function tracksForTerm(
   if (!rows.length) return [];
 
   const options = await db
-    .select()
+    .select({
+      id: trackOptions.id,
+      trackId: trackOptions.trackId,
+      groupId: trackOptions.groupId,
+      groupName: trackGroups.name,
+      name: trackOptions.name,
+      description: trackOptions.description,
+      sortOrder: trackOptions.sortOrder,
+      active: trackOptions.active,
+    })
     .from(trackOptions)
+    .leftJoin(trackGroups, eq(trackOptions.groupId, trackGroups.id))
     .where(inArray(trackOptions.trackId, rows.map((r) => r.id)))
     .orderBy(asc(trackOptions.sortOrder), asc(trackOptions.name));
+
+  // Every กลุ่มวิชา the term touches, สาย and แขนง together, in one query — the
+  // same กลุ่ม is often behind several of them.
+  const groupIds = [
+    ...new Set(
+      [...rows.map((r) => r.groupId), ...options.map((o) => o.groupId)].filter(
+        (id): id is number => id !== null,
+      ),
+    ),
+  ];
+  const byGroup = new Map<number, TrackSubjectRow[]>();
+  if (groupIds.length) {
+    const subjects = await db
+      .select({
+        id: trackSubjects.id,
+        groupId: trackSubjects.groupId,
+        code: trackSubjects.code,
+        name: trackSubjects.name,
+        description: trackSubjects.description,
+        teacherName: trackSubjects.teacherName,
+        semester: trackSubjects.semester,
+        phase: trackSubjects.phase,
+      })
+      .from(trackSubjects)
+      .where(and(inArray(trackSubjects.groupId, groupIds), eq(trackSubjects.active, true)))
+      .orderBy(asc(trackSubjects.phase), asc(trackSubjects.code));
+    for (const { groupId, ...s } of subjects) {
+      const list = byGroup.get(groupId) ?? [];
+      list.push(s);
+      byGroup.set(groupId, list);
+    }
+  }
+
+  /** วิชาของกลุ่มหนึ่ง ที่ตรงกับภาคเรียนและช่วงของสาย */
+  const subjectsOf = (groupId: number | null, track: { semester: number; phase: number | null }) =>
+    groupId === null
+      ? []
+      : (byGroup.get(groupId) ?? []).filter((s) => subjectInTrack(track, s));
+
   const byTrack = new Map<number, TrackOptionRow[]>();
   for (const o of options) {
     if (opts.activeOnly && !o.active) continue;
+    const track = rows.find((r) => r.id === o.trackId);
+    if (!track) continue;
     const list = byTrack.get(o.trackId) ?? [];
     list.push({
       id: o.id,
+      groupId: o.groupId,
+      groupName: o.groupName,
       name: o.name,
       description: o.description,
       sortOrder: o.sortOrder,
       active: o.active,
+      subjects: subjectsOf(o.groupId, track),
     });
     byTrack.set(o.trackId, list);
   }
@@ -101,14 +193,64 @@ export async function tracksForTerm(
     id: t.id,
     yearId: t.yearId,
     semester: t.semester,
+    groupId: t.groupId,
+    groupCode: t.groupCode,
+    groupName: t.groupName,
+    phase: t.phase,
     name: t.name,
     description: t.description,
+    admissionNote: t.admissionNote,
     gradeLevels: t.gradeLevels ?? [],
     opensAt: t.opensAt?.toISOString() ?? null,
     closesAt: t.closesAt?.toISOString() ?? null,
     active: t.active,
     options: byTrack.get(t.id) ?? [],
+    subjects: subjectsOf(t.groupId, t),
   }));
+}
+
+/**
+ * กลุ่มวิชาทั้งหมดที่ยังเปิดอยู่ พร้อมวิชาในกลุ่ม — the catalogue the สร้าง Track
+ * form draws from.
+ *
+ * The whole thing is sent to the form rather than fetched per กลุ่ม on change:
+ * the admin is comparing กลุ่ม against กลุ่ม while deciding, and the preview of
+ * "วิชาที่นักเรียนจะได้เจอ" has to appear the moment they pick one.
+ */
+export async function groupCatalog(): Promise<GroupCatalogRow[]> {
+  const [groups, subjects] = await Promise.all([
+    db
+      .select({
+        id: trackGroups.id,
+        code: trackGroups.code,
+        name: trackGroups.name,
+        description: trackGroups.description,
+      })
+      .from(trackGroups)
+      .where(eq(trackGroups.active, true))
+      .orderBy(asc(trackGroups.code)),
+    db
+      .select({
+        id: trackSubjects.id,
+        groupId: trackSubjects.groupId,
+        code: trackSubjects.code,
+        name: trackSubjects.name,
+        description: trackSubjects.description,
+        teacherName: trackSubjects.teacherName,
+        semester: trackSubjects.semester,
+        phase: trackSubjects.phase,
+      })
+      .from(trackSubjects)
+      .where(eq(trackSubjects.active, true))
+      .orderBy(asc(trackSubjects.phase), asc(trackSubjects.code)),
+  ]);
+  const byGroup = new Map<number, TrackSubjectRow[]>();
+  for (const { groupId, ...s } of subjects) {
+    const list = byGroup.get(groupId) ?? [];
+    list.push(s);
+    byGroup.set(groupId, list);
+  }
+  return groups.map((g) => ({ ...g, subjects: byGroup.get(g.id) ?? [] }));
 }
 
 export interface ChoiceRow {

@@ -28,26 +28,93 @@ export function isSemester(n: unknown): n is number {
   return (SEMESTERS as readonly number[]).includes(n as number);
 }
 
+/**
+ * A วิชา a สาย leads to, as the two screens show it.
+ *
+ * Copied out of the catalogue rather than linked to it: this is what the
+ * นักเรียน reads on หน้ารายละเอียด before choosing, and the ผู้ดูแล previews
+ * while setting the สาย up — neither needs anything the catalogue row does not
+ * already say.
+ */
+export interface TrackSubjectRow {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  teacherName: string | null;
+  semester: number | null;
+  phase: number | null;
+}
+
 export interface TrackOptionRow {
   id: number;
+  /** กลุ่มวิชาของแขนงนี้ — null when the แขนง has no วิชา of its own */
+  groupId: number | null;
+  groupName: string | null;
   name: string;
   description: string | null;
   sortOrder: number;
   active: boolean;
+  /** วิชาของแขนงนี้ในช่วงที่สายเปิด — empty when it has no กลุ่มวิชา */
+  subjects: TrackSubjectRow[];
 }
 
 export interface TrackRow {
   id: number;
   yearId: number;
   semester: number;
+  /** กลุ่มวิชาที่สายนี้พาไปเรียน — null on a Track made before the link existed */
+  groupId: number | null;
+  groupCode: string | null;
+  groupName: string | null;
+  /** ช่วงในภาคเรียน — 1, 2, or null for ทั้งภาคเรียน */
+  phase: number | null;
   name: string;
   description: string | null;
+  admissionNote: string | null;
   gradeLevels: string[];
   /** ISO instants, or null for "not fenced on that side" */
   opensAt: string | null;
   closesAt: string | null;
   active: boolean;
   options: TrackOptionRow[];
+  /** วิชาที่นักเรียนจะได้เรียนถ้าเลือกสายนี้ */
+  subjects: TrackSubjectRow[];
+}
+
+/**
+ * กลุ่มวิชาหนึ่ง พร้อมวิชาในกลุ่ม — the catalogue the ผู้ดูแล picks a Track's
+ * name and วิชา from. Declared here rather than beside the query because the
+ * form that reads it is a client component.
+ */
+export interface GroupCatalogRow {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  subjects: TrackSubjectRow[];
+}
+
+/** ช่วงในภาคเรียนที่สายเปิด, in words — null is every ช่วง of that ภาคเรียน. */
+export function trackPhaseLabel(phase: number | null): string {
+  return phase ? `ช่วงที่ ${phase}` : 'ทั้งภาคเรียน';
+}
+
+/**
+ * Whether a วิชา of the กลุ่ม belongs to this สาย — the ภาคเรียน must match,
+ * and the ช่วง too unless the สาย runs ทั้งภาคเรียน.
+ *
+ * A วิชา that nobody has placed in a ช่วง yet is left out rather than shown
+ * everywhere: the list is a promise about what the นักเรียน will be taught, and
+ * "ยังไม่ระบุช่วง" is not one the school has made.
+ */
+export function subjectInTrack(
+  track: { semester: number; phase: number | null },
+  subject: { semester: number | null; phase: number | null },
+): boolean {
+  if (subject.semester === null || subject.phase === null) return false;
+  if (subject.semester !== track.semester) return false;
+  return track.phase === null || subject.phase === track.phase;
 }
 
 /**

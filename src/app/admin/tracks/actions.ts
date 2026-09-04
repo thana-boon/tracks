@@ -4,17 +4,33 @@ import { revalidatePath } from 'next/cache';
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db';
-import { academicYears, people, trackChoices, trackOptions, tracks } from '@/db/schema';
+import {
+  academicYears,
+  people,
+  trackChoices,
+  trackGroups,
+  trackOptions,
+  trackSubjects,
+  tracks,
+} from '@/db/schema';
 import { actorOf, requireRole } from '@/lib/authz';
 import { logActivity } from '@/lib/log';
 import { optionProblem } from '@/lib/tracks';
-import { GRADE_LEVELS, SEMESTERS, trackAllows, trackWindow } from '@/lib/track-core';
+import {
+  GRADE_LEVELS,
+  SEMESTERS,
+  trackAllows,
+  trackPhaseLabel,
+  trackWindow,
+} from '@/lib/track-core';
 import { fromSchoolDateTimeInput, thaiDateTimeLongOf } from '@/lib/utils';
 import type { ActionResult } from '@/components/action-button';
 
 const OptionInput = z.object({
   /** null adds a new ข้อย่อย; an id edits the one it names */
   id: z.number().int().positive().nullable(),
+  /** กลุ่มวิชาของแขนงนี้ — null when the แขนง has no วิชา of its own */
+  groupId: z.number().int().positive().nullable().optional().default(null),
   name: z.string().trim().min(1, 'กรอกชื่อข้อย่อย').max(120),
   description: z.string().trim().max(500).optional().default(''),
 });
@@ -22,8 +38,13 @@ const OptionInput = z.object({
 const TrackInput = z.object({
   yearId: z.number().int().positive(),
   semester: z.number().int().refine((n) => SEMESTERS.includes(n as 1 | 2), 'ภาคเรียนไม่ถูกต้อง'),
+  /** กลุ่มวิชาที่ Track นี้พาไปเรียน — ชื่อ Track ตั้งต้นมาจากกลุ่มนี้ */
+  groupId: z.number().int().positive({ message: 'เลือกกลุ่มวิชาของ Track นี้' }),
+  /** ช่วงในภาคเรียน — 1, 2, หรือ null สำหรับทั้งภาคเรียน */
+  phase: z.number().int().min(1).max(2).nullable().optional().default(null),
   name: z.string().trim().min(1, 'กรอกชื่อ Track').max(120),
   description: z.string().trim().max(500).optional().default(''),
+  admissionNote: z.string().trim().max(2000).optional().default(''),
   gradeLevels: z.array(z.string().trim()).max(GRADE_LEVELS.length),
   /** "YYYY-MM-DDTHH:MM" in school time, or '' for "ไม่กำหนด" on that side */
   opensAt: z.string().trim().max(32).optional().default(''),
@@ -48,7 +69,8 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
   const parsed = TrackInput.safeParse(form);
   if (!parsed.success)
     return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
-  const { yearId, semester, name, description, gradeLevels, options } = parsed.data;
+  const { yearId, semester, groupId, phase, name, description, admissionNote, gradeLevels, options } =
+    parsed.data;
 
   // ช่วงเวลาเปิด-ปิด. Either side may be left blank — an unfenced side means
   // "ไม่กำหนด", not "now". A blank string has to survive as null rather than
@@ -70,6 +92,18 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
     .where(eq(academicYears.id, yearId))
     .limit(1);
   if (!year) return { ok: false, message: 'ไม่พบปีการศึกษานี้' };
+
+  // The กลุ่มวิชา behind the สาย, and behind each แขนง that names one, have to
+  // exist: they are what the นักเรียน's หน้ารายละเอียด reads the วิชา out of, and
+  // a สาย pointing at a deleted กลุ่ม would show an empty promise.
+  const wantedGroups = [
+    ...new Set([groupId, ...options.map((o) => o.groupId ?? null)].filter((g): g is number => !!g)),
+  ];
+  const known = await db
+    .select({ id: trackGroups.id })
+    .from(trackGroups)
+    .where(inArray(trackGroups.id, wantedGroups));
+  if (known.length !== wantedGroups.length) return { ok: false, message: 'ไม่พบกลุ่มวิชาที่เลือก' };
 
   // Two สาย of one ภาคเรียน sharing a name would be indistinguishable to the
   // student choosing between them.
@@ -128,8 +162,11 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
           .set({
             yearId,
             semester,
+            groupId,
+            phase,
             name,
             description: description || null,
+            admissionNote: admissionNote || null,
             gradeLevels: grades,
             opensAt,
             closesAt,
@@ -141,8 +178,11 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
           .values({
             yearId,
             semester,
+            groupId,
+            phase,
             name,
             description: description || null,
+            admissionNote: admissionNote || null,
             gradeLevels: grades,
             opensAt,
             closesAt,
@@ -176,11 +216,17 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
         if (o.id) {
           await tx
             .update(trackOptions)
-            .set({ name: o.name, description: o.description || null, sortOrder: i })
+            .set({
+              groupId: o.groupId ?? null,
+              name: o.name,
+              description: o.description || null,
+              sortOrder: i,
+            })
             .where(and(eq(trackOptions.id, o.id), eq(trackOptions.trackId, tid)));
         } else {
           await tx.insert(trackOptions).values({
             trackId: tid,
+            groupId: o.groupId ?? null,
             name: o.name,
             description: o.description || null,
             sortOrder: i,
@@ -197,6 +243,8 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
     name,
     year: year.year,
     semester,
+    groupId,
+    phase,
     gradeLevels: grades,
     opensAt: opensAt?.toISOString(),
     closesAt: closesAt?.toISOString(),
@@ -214,10 +262,28 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
     : closesAt
       ? ` — เปิดให้เลือกถึง ${thaiDateTimeLongOf(closesAt)}`
       : '';
+  // How many วิชา the สาย actually leads to, read back rather than assumed. A
+  // กลุ่ม whose วิชา all sit in the other ช่วง saves fine and then shows the
+  // นักเรียน nothing — better to hear that here than from a student.
+  const [{ n: subjectCount } = { n: 0 }] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(trackSubjects)
+    .where(
+      and(
+        eq(trackSubjects.groupId, groupId),
+        eq(trackSubjects.active, true),
+        eq(trackSubjects.semester, semester),
+        ...(phase ? [eq(trackSubjects.phase, phase)] : []),
+      ),
+    );
+  const subjectNote = Number(subjectCount)
+    ? ` — ${trackPhaseLabel(phase)} มีวิชา ${subjectCount} วิชา`
+    : ` — ยังไม่มีวิชาในกลุ่มนี้สำหรับภาคเรียนที่ ${semester} ${trackPhaseLabel(phase)}`;
+
   return {
     ok: true,
-    message: `${id ? 'แก้ไข' : 'สร้าง'} “${name}” แล้ว${
-      options.length ? ` — ข้อย่อย ${options.length} รายการ` : ''
+    message: `${id ? 'แก้ไข' : 'สร้าง'} “${name}” แล้ว${subjectNote}${
+      options.length ? ` · ข้อย่อย ${options.length} รายการ` : ''
     }${windowNote}`,
   };
 }

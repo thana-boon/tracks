@@ -2,12 +2,23 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CalendarClock, CheckCircle2, History, Lock, Route } from 'lucide-react';
+import {
+  BookOpen,
+  CalendarClock,
+  CheckCircle2,
+  GraduationCap,
+  History,
+  Info,
+  Lock,
+  Route,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge, Button, Card, CardHeader, EmptyState, Select } from '@/components/ui';
-import { useDialog } from '@/components/dialog';
+import { Modal, useDialog } from '@/components/dialog';
+import { SubjectList } from '@/components/track-subjects';
 import {
   termLabel,
+  trackPhaseLabel,
   trackWindow,
   type Term,
   type TrackRow,
@@ -67,6 +78,7 @@ export function TrackChooser({
   const dialog = useDialog();
   const [trackId, setTrackId] = useState<number | null>(null);
   const [optionId, setOptionId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<TrackRow | null>(null);
   const [saving, setSaving] = useState(false);
 
   const selected = tracks.find((t) => t.id === trackId) ?? null;
@@ -214,6 +226,10 @@ export function TrackChooser({
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium">{t.name}</span>
+                      <Badge tone="navy">{trackPhaseLabel(t.phase)}</Badge>
+                      {t.subjects.length ? (
+                        <Badge tone="secondary">{t.subjects.length} วิชา</Badge>
+                      ) : null}
                       {t.options.length ? (
                         <Badge tone="secondary">มีข้อย่อย {t.options.length} รายการ</Badge>
                       ) : null}
@@ -228,6 +244,17 @@ export function TrackChooser({
                       </p>
                     ) : null}
                   </button>
+
+                  <div className="mt-1.5 pl-1">
+                    <button
+                      type="button"
+                      onClick={() => setDetail(t)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+                    >
+                      <Info className="size-3.5" strokeWidth={1.8} />
+                      ดูรายละเอียด — เรียนอะไรบ้าง
+                    </button>
+                  </div>
 
                   {on && !shut && t.options.length ? (
                     <ul className="mt-2 space-y-2 pl-4">
@@ -274,6 +301,8 @@ export function TrackChooser({
         </Card>
       )}
 
+      {detail ? <TrackDetail track={detail} onClose={() => setDetail(null)} /> : null}
+
       {history.length ? (
         <Card>
           <CardHeader
@@ -294,5 +323,90 @@ export function TrackChooser({
         </Card>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * หน้ารายละเอียดของสายหนึ่ง — what a นักเรียน gets by choosing it.
+ *
+ * Read-only on purpose: it answers "เลือกแล้วจะได้เรียนอะไร และเหมาะกับคณะไหน"
+ * and hands the decision back to the list, so a student cannot confirm from
+ * inside a panel they opened only to look.
+ */
+function TrackDetail({ track, onClose }: { track: TrackRow; onClose: () => void }) {
+  return (
+    <Modal
+      onClose={onClose}
+      labelledBy="track-detail-title"
+      footer={
+        <Button variant="outline" onClick={onClose}>
+          ปิด
+        </Button>
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 id="track-detail-title" className="text-base font-semibold">
+          {track.name}
+        </h2>
+        <Badge tone="navy">
+          ภาคเรียนที่ {track.semester} · {trackPhaseLabel(track.phase)}
+        </Badge>
+        {track.groupCode ? <Badge tone="secondary">กลุ่ม {track.groupCode}</Badge> : null}
+      </div>
+      {track.description ? (
+        <p className="mt-1.5 text-sm text-muted-foreground">{track.description}</p>
+      ) : null}
+
+      <div className="mt-4 space-y-4">
+        <section>
+          <p className="flex items-center gap-1.5 text-sm font-medium">
+            <BookOpen className="size-4" strokeWidth={1.8} />
+            วิชาที่จะได้เรียน
+          </p>
+          <div className="mt-2">
+            <SubjectList
+              subjects={track.subjects}
+              empty="ยังไม่ได้ระบุวิชาของสายนี้ — สอบถามผู้ดูแลระบบ"
+            />
+          </div>
+        </section>
+
+        {track.options.length ? (
+          <section>
+            <p className="flex items-center gap-1.5 text-sm font-medium">
+              <Route className="size-4" strokeWidth={1.8} />
+              ข้อย่อยที่เลือกได้ — เลือกได้หนึ่งข้อ
+            </p>
+            <ul className="mt-2 space-y-2.5">
+              {track.options.map((o) => (
+                <li key={o.id} className="rounded-xl border border-border p-3">
+                  <p className="text-sm font-medium">{o.name}</p>
+                  {o.description ? (
+                    <p className="mt-0.5 text-xs text-muted-foreground">{o.description}</p>
+                  ) : null}
+                  {o.groupId ? (
+                    <div className="mt-2">
+                      <SubjectList subjects={o.subjects} empty="ยังไม่ได้ระบุวิชาของข้อย่อยนี้" />
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {track.admissionNote ? (
+          <section className="rounded-xl bg-secondary/50 p-3.5">
+            <p className="flex items-center gap-1.5 text-sm font-medium">
+              <GraduationCap className="size-4" strokeWidth={1.8} />
+              เรียนแล้วเหมาะกับคณะ/มหาวิทยาลัยอะไร
+            </p>
+            <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">
+              {track.admissionNote}
+            </p>
+          </section>
+        ) : null}
+      </div>
+    </Modal>
   );
 }

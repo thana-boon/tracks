@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { trackChoosable, trackWindow } from './track-core';
+import { subjectInTrack, trackChoosable, trackPhaseLabel, trackWindow } from './track-core';
 import { fromSchoolDateTimeInput, toSchoolDateTimeInput } from './utils';
 
 /** 09:00 น. school time on 1 มิถุนายน, as the instant it actually is. */
@@ -49,4 +49,24 @@ test('a datetime-local value is read as school time, not the server’s', () => 
   assert.equal(toSchoolDateTimeInput(at('2026-06-01T08:00')), '2026-06-01T08:00');
   assert.equal(fromSchoolDateTimeInput(''), null);
   assert.equal(fromSchoolDateTimeInput('2026-06-01'), null);
+});
+
+test('a สาย shows only the วิชา of its own ภาคเรียน and ช่วง', () => {
+  const track = { semester: 1, phase: 2 };
+  assert.equal(subjectInTrack(track, { semester: 1, phase: 2 }), true);
+  assert.equal(subjectInTrack(track, { semester: 1, phase: 1 }), false);
+  assert.equal(subjectInTrack(track, { semester: 2, phase: 2 }), false);
+  // A วิชา nobody has placed in a ช่วง is not promised to anyone.
+  assert.equal(subjectInTrack(track, { semester: null, phase: null }), false);
+  assert.equal(subjectInTrack(track, { semester: 1, phase: null }), false);
+});
+
+test('a สาย that runs ทั้งภาคเรียน takes both ช่วง of that ภาคเรียน', () => {
+  const track = { semester: 2, phase: null };
+  assert.equal(subjectInTrack(track, { semester: 2, phase: 1 }), true);
+  assert.equal(subjectInTrack(track, { semester: 2, phase: 2 }), true);
+  assert.equal(subjectInTrack(track, { semester: 1, phase: 1 }), false);
+  assert.equal(subjectInTrack(track, { semester: 2, phase: null }), false);
+  assert.equal(trackPhaseLabel(null), 'ทั้งภาคเรียน');
+  assert.equal(trackPhaseLabel(1), 'ช่วงที่ 1');
 });

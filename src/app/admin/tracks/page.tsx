@@ -1,6 +1,6 @@
 import { requireRole } from '@/lib/authz';
 import { allYears } from '@/lib/years';
-import { choiceCountsForTerm, resolveTerm, tracksForTerm } from '@/lib/tracks';
+import { choiceCountsForTerm, groupCatalog, resolveTerm, tracksForTerm } from '@/lib/tracks';
 import { NeedYear } from '@/components/ui';
 import { TracksManager } from './tracks-manager';
 
@@ -27,15 +27,17 @@ export default async function AdminTracksPage({
   const term = await resolveTerm(Number(sp.year) || null, Number(sp.semester) || null);
   if (!term) return <NeedYear />;
 
-  const [tracks, counts] = await Promise.all([
+  const [tracks, counts, groups] = await Promise.all([
     tracksForTerm(term.yearId, term.semester),
     choiceCountsForTerm(term.yearId, term.semester),
+    groupCatalog(),
   ]);
 
   return (
     <TracksManager
       term={term}
       years={years.map((y) => ({ id: y.id, year: y.year }))}
+      groups={groups}
       tracks={tracks.map((t) => ({ ...t, chosenCount: counts.get(t.id) ?? 0 }))}
     />
   );

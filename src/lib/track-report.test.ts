@@ -10,19 +10,28 @@ function track(id: number, name: string, options: string[] = [], active = true):
     id,
     yearId: 1,
     semester: 1,
+    groupId: null,
+    groupCode: null,
+    groupName: null,
+    phase: null,
     name,
     description: null,
+    admissionNote: null,
     gradeLevels: [],
     opensAt: null,
     closesAt: null,
     active,
     options: options.map((o, i) => ({
       id: id * 100 + i,
+      groupId: null,
+      groupName: null,
       name: o,
       description: null,
       sortOrder: i,
       active: true,
+      subjects: [],
     })),
+    subjects: [],
   };
 }
 

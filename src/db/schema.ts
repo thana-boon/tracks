@@ -389,8 +389,29 @@ export const tracks = pgTable(
       .references(() => academicYears.id, { onDelete: 'cascade' }),
     /** ภาคเรียน — 1 or 2 */
     semester: integer('semester').notNull(),
+    /**
+     * กลุ่มวิชาที่สายนี้พานักเรียนไปเรียน — the catalogue group whose วิชา a
+     * student gets by choosing this สาย. Null only on a Track created before
+     * the link existed: those keep their typed name and simply have no วิชา to
+     * show. `restrict` because deleting a กลุ่มวิชา out from under a สาย
+     * students have already chosen would leave the choice pointing at nothing.
+     */
+    groupId: integer('group_id').references(() => trackGroups.id, { onDelete: 'restrict' }),
+    /**
+     * ช่วงในภาคเรียนที่สายนี้เปิด — 1 or 2, or null for "ทั้งภาคเรียน". It
+     * narrows which วิชา of the กลุ่ม the สาย shows: a กลุ่ม usually spreads
+     * its วิชา across both ช่วง, and a สาย is offered for one of them.
+     */
+    phase: integer('phase'),
     name: text('name').notNull(),
     description: text('description'),
+    /**
+     * เรียนสายนี้แล้วเหมาะกับคณะ/มหาวิทยาลัยอะไร — free text the ผู้ดูแล writes
+     * and the นักเรียน reads on หน้ารายละเอียด. Kept apart from `description`
+     * because the list shows the one-line description and this is the long
+     * answer to a different question.
+     */
+    admissionNote: text('admission_note'),
     /** ระดับชั้นที่เลือกสายนี้ได้ — ["ม.4","ม.5"]; empty means every ชั้น */
     gradeLevels: jsonb('grade_levels').$type<string[]>().notNull().default([]),
     /**
@@ -421,6 +442,8 @@ export const trackOptions = pgTable(
     trackId: integer('track_id')
       .notNull()
       .references(() => tracks.id, { onDelete: 'cascade' }),
+    /** กลุ่มวิชาของแขนงนี้ — set when the แขนง has วิชา of its own to show */
+    groupId: integer('group_id').references(() => trackGroups.id, { onDelete: 'restrict' }),
     name: text('name').notNull(),
     description: text('description'),
     /** display order on the เลือก Track screen */

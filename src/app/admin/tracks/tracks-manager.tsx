@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Plus, Pencil, Trash2, Route, Power, Users, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Route, Power, Users, X, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Badge,
@@ -17,28 +17,23 @@ import {
   Textarea,
 } from '@/components/ui';
 import { Modal, useDialog } from '@/components/dialog';
-import { GRADE_LEVELS, SEMESTERS, trackWindow, type Term } from '@/lib/track-core';
+import { SubjectList } from '@/components/track-subjects';
+import {
+  GRADE_LEVELS,
+  SEMESTERS,
+  subjectInTrack,
+  trackPhaseLabel,
+  trackWindow,
+  type GroupCatalogRow,
+  type Term,
+  type TrackRow,
+} from '@/lib/track-core';
+import { PHASES } from '@/lib/subject-phase';
 import { cn, fromSchoolDateTimeInput, thaiDateTimeLongOf, toSchoolDateTimeInput } from '@/lib/utils';
 import { deleteTrack, saveTrack, toggleTrack } from './actions';
 
-export interface ManagerOption {
-  id: number;
-  name: string;
-  description: string | null;
-}
-
-export interface ManagerTrack {
-  id: number;
-  yearId: number;
-  semester: number;
-  name: string;
-  description: string | null;
-  gradeLevels: string[];
-  /** ISO instants, null on a side that is not fenced */
-  opensAt: string | null;
-  closesAt: string | null;
-  active: boolean;
-  options: ManagerOption[];
+/** A Track as the list shows it — the row plus how many have picked it. */
+export interface ManagerTrack extends TrackRow {
   chosenCount: number;
 }
 
@@ -90,10 +85,13 @@ export interface YearOption {
 export function TracksManager({
   term,
   years,
+  groups,
   tracks,
 }: {
   term: Term;
   years: YearOption[];
+  /** กลุ่มวิชาที่สร้างไว้แล้ว — ชื่อ Track และวิชาของมันมาจากที่นี่ */
+  groups: GroupCatalogRow[];
   tracks: ManagerTrack[];
 }) {
   const router = useRouter();
@@ -196,6 +194,13 @@ export function TracksManager({
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-medium">{t.name}</p>
                     {!t.active ? <Badge tone="secondary">ปิดไม่ให้เลือก</Badge> : null}
+                    {t.groupCode ? (
+                      <Badge tone="secondary">
+                        กลุ่ม {t.groupCode} · {trackPhaseLabel(t.phase)}
+                      </Badge>
+                    ) : (
+                      <Badge tone="secondary">ยังไม่ผูกกลุ่มวิชา</Badge>
+                    )}
                     <Badge tone="navy">
                       {t.gradeLevels.length ? t.gradeLevels.join(' · ') : 'ทุกระดับชั้น'}
                     </Badge>
@@ -208,6 +213,15 @@ export function TracksManager({
                   {t.description ? (
                     <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
                   ) : null}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t.groupId
+                      ? t.subjects.length
+                        ? `วิชาที่จะได้เรียน ${t.subjects.length} วิชา — ${t.subjects
+                            .map((x) => x.name)
+                            .join(', ')}`
+                        : `กลุ่ม ${t.groupName} ยังไม่มีวิชาในภาคเรียนที่ ${t.semester} ${trackPhaseLabel(t.phase)}`
+                      : 'แก้ไขเพื่อผูกกลุ่มวิชา แล้วนักเรียนจึงจะเห็นรายละเอียดวิชา'}
+                  </p>
                   {t.options.length ? (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {t.options.map((o) => (
@@ -216,6 +230,7 @@ export function TracksManager({
                           className="rounded-full bg-secondary px-2.5 py-0.5 text-xs text-secondary-foreground"
                         >
                           {o.name}
+                          {o.groupName ? ` · ${o.subjects.length} วิชา` : ''}
                         </span>
                       ))}
                     </div>
@@ -253,10 +268,21 @@ export function TracksManager({
       )}
 
       {creating ? (
-        <TrackForm term={term} years={years} onClose={() => setCreating(false)} />
+        <TrackForm
+          term={term}
+          years={years}
+          groups={groups}
+          onClose={() => setCreating(false)}
+        />
       ) : null}
       {editing ? (
-        <TrackForm term={term} years={years} track={editing} onClose={() => setEditing(null)} />
+        <TrackForm
+          term={term}
+          years={years}
+          groups={groups}
+          track={editing}
+          onClose={() => setEditing(null)}
+        />
       ) : null}
     </div>
   );
@@ -266,6 +292,7 @@ export function TracksManager({
 interface DraftOption {
   key: string;
   id: number | null;
+  groupId: number | null;
   name: string;
   description: string;
 }
@@ -273,18 +300,23 @@ interface DraftOption {
 function TrackForm({
   term,
   years,
+  groups,
   track,
   onClose,
 }: {
   term: Term;
   years: YearOption[];
+  groups: GroupCatalogRow[];
   track?: ManagerTrack;
   onClose: () => void;
 }) {
   const [yearId, setYearId] = useState(track?.yearId ?? term.yearId);
   const [semester, setSemester] = useState(track?.semester ?? term.semester);
+  const [groupId, setGroupId] = useState<number | null>(track?.groupId ?? null);
+  const [phase, setPhase] = useState<number | null>(track?.phase ?? null);
   const [name, setName] = useState(track?.name ?? '');
   const [description, setDescription] = useState(track?.description ?? '');
+  const [admissionNote, setAdmissionNote] = useState(track?.admissionNote ?? '');
   const [grades, setGrades] = useState<string[]>(track?.gradeLevels ?? []);
   const [opensAt, setOpensAt] = useState(
     toSchoolDateTimeInput(track?.opensAt ? new Date(track.opensAt) : null),
@@ -296,11 +328,34 @@ function TrackForm({
     (track?.options ?? []).map((o) => ({
       key: `o${o.id}`,
       id: o.id,
+      groupId: o.groupId,
       name: o.name,
       description: o.description ?? '',
     })),
   );
   const [saving, setSaving] = useState(false);
+
+  const group = groups.find((g) => g.id === groupId) ?? null;
+
+  /** วิชาของกลุ่มหนึ่งที่ตรงกับภาคเรียนและช่วงที่กำลังตั้ง — the live preview. */
+  function preview(id: number | null) {
+    if (!id) return [];
+    const g = groups.find((x) => x.id === id);
+    return (g?.subjects ?? []).filter((sub) => subjectInTrack({ semester, phase }, sub));
+  }
+
+  /**
+   * Picking a กลุ่มวิชา fills the name in — that is what "ดึงชื่อมาจากกลุ่มวิชา"
+   * means. It only overwrites a name the admin has not made their own: two สาย
+   * of one ภาคเรียน may come from the same กลุ่ม in different ช่วง, and the
+   * second one is told apart by a name typed over the top of this one.
+   */
+  function pickGroup(id: number | null) {
+    const next = groups.find((g) => g.id === id) ?? null;
+    const untouched = !name.trim() || groups.some((g) => g.name === name || g.code === name);
+    setGroupId(id);
+    if (next && untouched) setName(next.name);
+  }
 
   function toggleGrade(g: string) {
     setGrades((cur) => (cur.includes(g) ? cur.filter((x) => x !== g) : [...cur, g]));
@@ -309,7 +364,7 @@ function TrackForm({
   function addOption() {
     setOptions((cur) => [
       ...cur,
-      { key: `new${Date.now()}${cur.length}`, id: null, name: '', description: '' },
+      { key: `new${Date.now()}${cur.length}`, id: null, groupId: null, name: '', description: '' },
     ]);
   }
 
@@ -319,18 +374,30 @@ function TrackForm({
 
   async function submit() {
     if (saving) return;
+    if (!groupId) {
+      toast.error('เลือกกลุ่มวิชาของ Track นี้');
+      return;
+    }
     setSaving(true);
     const r = await saveTrack(track?.id ?? null, {
       yearId,
       semester,
+      groupId,
+      phase,
       name,
       description,
+      admissionNote,
       gradeLevels: grades,
       opensAt,
       closesAt,
       options: options
         .filter((o) => o.name.trim())
-        .map((o) => ({ id: o.id, name: o.name, description: o.description })),
+        .map((o) => ({
+          id: o.id,
+          groupId: o.groupId,
+          name: o.name,
+          description: o.description,
+        })),
     });
     setSaving(false);
     if (r.ok) {
@@ -361,17 +428,47 @@ function TrackForm({
       </h2>
       <div className="mt-4 space-y-3.5">
         <div>
+          <Label htmlFor="t-group">กลุ่มวิชา</Label>
+          {groups.length ? (
+            <>
+              <Select
+                id="t-group"
+                value={groupId ?? ''}
+                onChange={(e) => pickGroup(Number(e.target.value) || null)}
+                autoFocus
+              >
+                <option value="">— เลือกกลุ่มวิชา —</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.code} — {g.name} ({g.subjects.length} วิชา)
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                ชื่อ Track ตั้งต้นจากกลุ่มที่เลือก และวิชาที่นักเรียนจะได้เรียนก็มาจากกลุ่มนี้
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              ยังไม่มีกลุ่มวิชาในระบบ — สร้างที่หน้า “กลุ่มวิชา” ก่อน แล้วจึงสร้าง Track
+            </p>
+          )}
+        </div>
+
+        <div>
           <Label htmlFor="t-name">ชื่อ Track</Label>
           <Input
             id="t-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="เช่น TrackSM"
-            autoFocus
           />
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            แก้ได้ — ใช้เมื่อเปิดกลุ่มเดียวกันสองช่วงในภาคเรียนเดียว จะได้แยกออกจากกัน
+          </p>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <Label htmlFor="t-year">ปีการศึกษา</Label>
             <Select id="t-year" value={yearId} onChange={(e) => setYearId(Number(e.target.value))}>
@@ -395,6 +492,40 @@ function TrackForm({
                 </option>
               ))}
             </Select>
+          </div>
+          <div>
+            <Label htmlFor="t-phase">ช่วง</Label>
+            <Select
+              id="t-phase"
+              value={phase ?? ''}
+              onChange={(e) => setPhase(Number(e.target.value) || null)}
+            >
+              <option value="">ทั้งภาคเรียน</option>
+              {PHASES.map((p) => (
+                <option key={p} value={p}>
+                  ช่วงที่ {p}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border p-3.5">
+          <div className="flex items-center gap-2">
+            <Layers className="size-4.5 text-muted-foreground" strokeWidth={1.8} />
+            <p className="text-sm font-medium">
+              วิชาที่นักเรียนจะได้เรียน — ภาคเรียนที่ {semester} {trackPhaseLabel(phase)}
+            </p>
+          </div>
+          <div className="mt-2.5">
+            {group ? (
+              <SubjectList
+                subjects={preview(groupId)}
+                empty={`กลุ่ม ${group.code} ยังไม่มีวิชาในช่วงนี้ — ไปกำหนดช่วงให้วิชาที่หน้า “วิชาเสริม”`}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground">เลือกกลุ่มวิชาก่อน</p>
+            )}
           </div>
         </div>
 
@@ -456,13 +587,28 @@ function TrackForm({
         </div>
 
         <div>
-          <Label htmlFor="t-desc">คำอธิบาย (ไม่บังคับ)</Label>
+          <Label htmlFor="t-desc">คำอธิบายสั้น (ไม่บังคับ)</Label>
           <Textarea
             id="t-desc"
             rows={2}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            placeholder="หนึ่งบรรทัดที่นักเรียนเห็นในรายการ"
           />
+        </div>
+
+        <div>
+          <Label htmlFor="t-admission">เรียนแล้วเหมาะกับคณะ/มหาวิทยาลัยอะไร (ไม่บังคับ)</Label>
+          <Textarea
+            id="t-admission"
+            rows={4}
+            value={admissionNote}
+            onChange={(e) => setAdmissionNote(e.target.value)}
+            placeholder="เช่น เหมาะกับคณะวิศวกรรมศาสตร์ วิทยาศาสตร์ …"
+          />
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            นักเรียนอ่านข้อความนี้ในหน้า “ดูรายละเอียด” ก่อนตัดสินใจเลือก
+          </p>
         </div>
 
         <div className="rounded-xl border border-border p-3.5">
@@ -480,7 +626,7 @@ function TrackForm({
           </div>
 
           {options.length ? (
-            <ul className="mt-3 space-y-2">
+            <ul className="mt-3 space-y-3">
               {options.map((o) => (
                 <li key={o.key} className="flex items-start gap-2">
                   <div className="min-w-0 flex-1 space-y-2">
@@ -496,6 +642,25 @@ function TrackForm({
                       placeholder="คำอธิบาย (ไม่บังคับ)"
                       className="h-9 text-xs"
                     />
+                    <Select
+                      value={o.groupId ?? ''}
+                      onChange={(e) =>
+                        editOption(o.key, { groupId: Number(e.target.value) || null })
+                      }
+                      className="h-9 text-xs"
+                    >
+                      <option value="">ใช้วิชาของ Track (ไม่แยกกลุ่มวิชา)</option>
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.code} — {g.name}
+                        </option>
+                      ))}
+                    </Select>
+                    {o.groupId ? (
+                      <div className="rounded-lg border border-border/60 p-2.5">
+                        <SubjectList subjects={preview(o.groupId)} />
+                      </div>
+                    ) : null}
                   </div>
                   <button
                     type="button"
