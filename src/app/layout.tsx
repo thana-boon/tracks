@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { IBM_Plex_Sans_Thai } from 'next/font/google';
 import { Toaster } from 'sonner';
+import { BackToSchoolOS } from '@/components/back-to-schoolos';
 import { DialogProvider } from '@/components/dialog';
 import './globals.css';
 
@@ -40,6 +41,8 @@ export default function RootLayout({
           richColors
           toastOptions={{ style: { fontFamily: 'var(--font-plex-thai)' } }}
         />
+        {/* Mounted here, outside the shells, so the login page has it too. */}
+        <BackToSchoolOS />
       </body>
     </html>
   );
