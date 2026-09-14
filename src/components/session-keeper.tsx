@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { withBasePath } from '@/lib/base-path';
 import { SESSION_EXP_COOKIE } from '@/lib/session-names';
 import { endedUrl, portalOf } from '@/lib/session-end';
-import { refreshSchoolOsSession, type SsoConfig } from '@/lib/sso-client';
+import { platformExpiry, refreshSchoolOsSession, type SsoConfig } from '@/lib/sso-client';
 
 /**
  * Keeps a session alive for exactly as long as somebody is using it.
@@ -44,8 +44,34 @@ const ACTIVE_WINDOW_MS = 5 * 60_000;
  */
 const RENEW_WHEN_REMAINING_MS = 8 * 60_000;
 
-/** How often to tell SchoolOS the user is still here, while they are. */
-const SCHOOLOS_REFRESH_MS = 10 * 60_000;
+/**
+ * Renew the SchoolOS session once less than this is left OF ITS OWN deadline —
+ * not on a cadence of ours.
+ *
+ * The cadence this replaced ("every ten minutes") was counted from the moment
+ * this component mounted, which is a clock with no relationship to the one that
+ * ends the session. Arrive here through a handoff and the platform's fifteen
+ * minutes may be nearly spent already — neither the handoff nor the probe slides
+ * it, on purpose — so the first renewal landed after it was over. Worse, a full
+ * page load remounts this and starts the ten minutes again, so somebody
+ * navigating every nine minutes renewed the platform session never, and was
+ * thrown out at minute fifteen with their hands on the keyboard.
+ *
+ * A third of the fifteen-minute window leaves two whole ticks of room to retry
+ * before anything is lost, and still only asks while somebody is actually here.
+ */
+const PLATFORM_RENEW_UNDER_MS = 5 * 60_000;
+
+/**
+ * How long to go between renewals when the deadline is NOT known — no storage
+ * (private mode), or an older Users Service that does not report it.
+ *
+ * Comfortably inside the platform's fifteen minutes, because blind is exactly
+ * when there is no second chance. It costs a handful of extra requests an hour
+ * from browsers that cannot remember anything, which is the cheap direction to
+ * be wrong in.
+ */
+const PLATFORM_BLIND_GAP_MS = 5 * 60_000;
 
 /**
  * What counts as a person being present.
@@ -66,12 +92,24 @@ function sessionExpiresAt(): number | null {
 }
 
 export function SessionKeeper({ sso, via }: { sso: SsoConfig; via?: string }) {
-  const lastActivity = useRef(Date.now());
-  const lastSchoolOsRefresh = useRef(Date.now());
+  // Seeded in the effect, not here: reading the clock during render is impure,
+  // and the only honest moment to start counting from is when the listeners go on.
+  const lastActivity = useRef(0);
+  /**
+   * Only ever the floor for the blind case below, and deliberately left at 0 on
+   * mount: a component that has just appeared knows nothing about the platform's
+   * clock, and starting this at `now` is precisely the assumption — "there must
+   * be a full window left" — that produced the timeout this file was rewritten
+   * to fix. Zero means "ask on the first tick that sees somebody", which is the
+   * honest answer.
+   */
+  const lastBlindRefresh = useRef(0);
   /** Guards against a slow renewal overlapping the next tick. */
   const busy = useRef(false);
 
   useEffect(() => {
+    lastActivity.current = Date.now();
+
     const seen = () => {
       lastActivity.current = Date.now();
     };
@@ -123,19 +161,44 @@ export function SessionKeeper({ sso, via }: { sso: SsoConfig; via?: string }) {
 
         // Only a session handed down from SchoolOS has one to keep alive. A
         // local admin account has no platform session at all, and asking on
-        // their behalf is a guaranteed 401 every ten minutes for nothing.
-        if (
-          via === 'sso' &&
-          sso.enabled &&
-          now - lastSchoolOsRefresh.current >= SCHOOLOS_REFRESH_MS
-        ) {
-          lastSchoolOsRefresh.current = now;
-          await refreshSchoolOsSession(sso);
+        // their behalf is a guaranteed 401 every few minutes for nothing.
+        if (via === 'sso' && sso.enabled) {
+          // SchoolOS's own deadline, kept current by every probe SessionGuard
+          // makes (once a minute, and on every page load) — so this survives the
+          // remount that used to reset the old timer.
+          const platformEnd = platformExpiry();
+          const due =
+            platformEnd === null
+              ? now - lastBlindRefresh.current >= PLATFORM_BLIND_GAP_MS
+              : platformEnd - now < PLATFORM_RENEW_UNDER_MS;
+
+          if (due) {
+            const res = await refreshSchoolOsSession(sso);
+            // Only a SUCCESS moves the floor. The line this replaced marked the
+            // attempt as done before it had happened and then threw the answer
+            // away, so one failed request — a blink, a 502 from the gateway —
+            // cost the whole gap and was never retried. Now a failure simply
+            // leaves the deadline where it was, and the next tick tries again
+            // while there is still room to.
+            if (res.ok) lastBlindRefresh.current = now;
+            // A 401 means the platform session is already over, and nothing here
+            // can bring it back. It is not this component's call to make:
+            // SessionGuard owns signing out, sees the same fact within a minute,
+            // and knows where to send them. refreshSchoolOsSession has already
+            // dropped the stale deadline.
+          }
         }
       } finally {
         busy.current = false;
       }
     };
+
+    // Once straight away, not only after the first minute. Loading a page IS the
+    // user moving, and the session this arrived on may be nearly over already —
+    // waiting a tick to find that out is how somebody gets thrown out seconds
+    // after opening a screen. Every gate above still applies, so a page that is
+    // in no danger does nothing here.
+    void tick();
 
     const timer = window.setInterval(() => void tick(), TICK_MS);
     return () => {

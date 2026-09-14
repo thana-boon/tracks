@@ -118,6 +118,51 @@ export function clearSentToPortal(): void {
   forget(BOUNCE_KEY);
 }
 
+/**
+ * When the SchoolOS session dies (epoch ms), as SchoolOS itself last said.
+ *
+ * SessionKeeper renews the platform session against THIS, not against a timer of
+ * its own, and the difference is the whole bug it was written to fix. A fixed
+ * "every ten minutes" cadence is counted from the moment the component mounted,
+ * and the platform's idle window is not: by the time this app loads, that window
+ * may have two minutes left on it — the handoff and the probe both deliberately
+ * refuse to slide it — and the first renewal would arrive eight minutes after it
+ * had already run out. Every full page load restarts that timer too, so somebody
+ * navigating every nine minutes renews the platform session *never*. Either way
+ * the person is thrown out mid-screen while plainly working, which is exactly
+ * what both of these components exist to prevent.
+ *
+ * `localStorage`, not `sessionStorage` and not a ref: the thing being described
+ * is one cookie belonging to the whole browser, so the deadline has to outlive
+ * this tab's page loads and be the same in every tab. It is a cached answer, not
+ * a credential — nothing is granted by holding it, the server re-decides on
+ * every call, and a browser that cannot store it simply falls back to asking.
+ */
+const PLATFORM_EXP_KEY = 'tracks:schoolos-expires-at';
+
+/** Write the deadline down, or drop it when SchoolOS says there is no session. */
+export function rememberPlatformExpiry(at: number | null): void {
+  try {
+    if (at === null || !Number.isFinite(at)) store()?.removeItem(PLATFORM_EXP_KEY);
+    else store()?.setItem(PLATFORM_EXP_KEY, String(at));
+  } catch {
+    /* storage is a convenience here; see platformExpiry() */
+  }
+}
+
+/**
+ * The deadline, or null when it is not known — a browser with no storage, or the
+ * first load after this shipped. Null must mean "go and ask", never "there is
+ * plenty of time": the caller that assumes the latter is the caller that lets
+ * the platform session lapse.
+ */
+export function platformExpiry(): number | null {
+  const raw = store()?.getItem(PLATFORM_EXP_KEY);
+  if (!raw) return null;
+  const at = Number(raw);
+  return Number.isFinite(at) ? at : null;
+}
+
 /** The deployment's SSO settings, read from our own server at runtime. */
 export async function fetchSsoConfig(): Promise<SsoConfig | null> {
   try {
@@ -166,6 +211,11 @@ export interface LiveSession {
   /** the platform's subject — the teacher/student code — when there is one */
   sub: string | null;
   code: string | null;
+  /**
+   * When the platform session dies (epoch ms), straight from SchoolOS. Null when
+   * nobody is signed in, or when an older Users Service does not send it.
+   */
+  expiresAt: number | null;
 }
 
 /**
@@ -191,15 +241,28 @@ export async function fetchLiveSession(cfg: SsoConfig): Promise<LiveSession | nu
     if (!res.ok) return null;
     const data = (await res.json()) as {
       valid?: boolean;
+      expiresAt?: number | null;
       user?: { sub?: string | null; code?: string | null } | null;
     };
+    // The field, not the status: "nobody is signed in" is answered with a 200.
+    const valid = Boolean(data.valid && data.user);
+    const expiresAt = valid && typeof data.expiresAt === 'number' ? data.expiresAt : null;
+    // Recorded here rather than at each call site, because it must not depend on
+    // anyone remembering to. This probe runs on every page load and once a
+    // minute after that (SessionGuard), so it is what keeps the deadline
+    // SessionKeeper renews against honest across page loads and tabs — and the
+    // only caller that could forget is the one whose forgetting causes the
+    // timeout. `valid:false` clears it: there is no session left to describe.
+    rememberPlatformExpiry(expiresAt);
     return {
-      // The field, not the status: "nobody is signed in" is answered with a 200.
-      valid: Boolean(data.valid && data.user),
+      valid,
       sub: data.user?.sub ?? null,
       code: data.user?.code ?? null,
+      expiresAt,
     };
   } catch {
+    // The question could not be asked. Leave whatever deadline we had alone —
+    // a network blink is not news about the session.
     return null;
   }
 }
@@ -264,19 +327,44 @@ export function logoutUrl(cfg: SsoConfig, next: string = cfg.portalUrl): string 
  * SchoolOS deliberately does not count activity in a satellite system as
  * activity — the handoff and probe endpoints do not slide its idle window,
  * because a consumer polling them would keep a walked-away session alive for
- * ever. So an hour of marking here is invisible to it unless we say so, and the
- * teacher gets signed out of the platform mid-lesson. This is how we say so, and
- * it must only ever be called when somebody has genuinely moved.
+ * ever. So an hour of work here is invisible to it unless we say so, and the
+ * person is signed out of the platform mid-screen. This is how we say so, and it
+ * must only ever be called when somebody has genuinely moved.
+ *
+ * The answer carries the new deadline, and the caller needs it: a renewal whose
+ * result is thrown away leaves the next one to be scheduled by guesswork. `ok`
+ * and `status` are kept apart for the same reason `fetchLiveSession` returns
+ * null instead of `valid:false` — a refresh that failed because the network
+ * blinked must be retried, and one that came back 401 must not, because the
+ * session it would renew is already over.
  */
-export async function refreshSchoolOsSession(cfg: SsoConfig): Promise<boolean> {
+export interface RefreshResult {
+  ok: boolean;
+  /** 0 when the request never got an answer at all. */
+  status: number;
+  /** the new deadline (epoch ms) on success */
+  expiresAt: number | null;
+}
+
+export async function refreshSchoolOsSession(cfg: SsoConfig): Promise<RefreshResult> {
   try {
     const res = await fetch(`${cfg.usersBase}/api/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
       signal: AbortSignal.timeout(6000),
     });
-    return res.ok;
+    if (!res.ok) {
+      // 401 is the platform saying the session is gone. Drop the deadline so
+      // nothing goes on counting down to a moment that has already passed;
+      // SessionGuard's probe is what acts on it.
+      if (res.status === 401) rememberPlatformExpiry(null);
+      return { ok: false, status: res.status, expiresAt: null };
+    }
+    const data = (await res.json().catch(() => ({}))) as { expiresAt?: number };
+    const expiresAt = typeof data.expiresAt === 'number' ? data.expiresAt : null;
+    rememberPlatformExpiry(expiresAt);
+    return { ok: true, status: res.status, expiresAt };
   } catch {
-    return false;
+    return { ok: false, status: 0, expiresAt: null };
   }
 }
