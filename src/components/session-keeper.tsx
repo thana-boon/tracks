@@ -91,7 +91,21 @@ function sessionExpiresAt(): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export function SessionKeeper({ sso, via }: { sso: SsoConfig; via?: string }) {
+const BASE_LOGIN = withBasePath('/login');
+
+export function SessionKeeper({
+  sso,
+  via,
+  client,
+}: {
+  sso: SsoConfig;
+  via?: string;
+  /**
+   * Which session windows this one is on. Only used to decide where an ended
+   * session lands — never to size a clock, which is the server's call.
+   */
+  client?: 'web' | 'pwa';
+}) {
   // Seeded in the effect, not here: reading the clock during render is impure,
   // and the only honest moment to start counting from is when the listeners go on.
   const lastActivity = useRef(0);
@@ -146,13 +160,25 @@ export function SessionKeeper({ sso, via }: { sso: SsoConfig; via?: string }) {
           // A network failure is emphatically not this: `res` is null, we do
           // nothing, and the next tick tries again.
           if (res?.status === 401) {
-            // Straight to the SchoolOS front door — that is where signing in
-            // again happens, and a stop at our own form on the way helps
-            // nobody. Only a local ผู้ดูแล goes to that form instead: they have
-            // no platform session and nothing to sign in there with. The
-            // `?ended=idle` they arrive with is what holds SSO off for one idle
-            // window, so the timeout they just hit is not immediately undone by
-            // whoever the browser happens to be signed in as.
+            // Where an ended session lands depends on which kind it was.
+            //
+            // A staffroom tab belongs at the SchoolOS front door: the timeout
+            // was the point, and signing in again is something only SchoolOS can
+            // do. The `?ended=idle` fallback (a deployment with no portal) holds
+            // SSO off for one idle window, so the timeout is not immediately
+            // undone by whoever the browser happens to be signed in as.
+            //
+            // An installed app does not. Its platform session is measured in
+            // weeks and is almost certainly still alive — our own cookie running
+            // out is all that happened — so it goes to our login page and lets
+            // silent SSO put it straight back. Sending it to the portal is trap
+            // 4.21: somebody who IS signed in, shown a sign-in page, left to
+            // find their own way back here. No `ended=` either, for the same
+            // reason: holding SSO off is exactly what must not happen.
+            if (client === 'pwa') {
+              window.location.assign(BASE_LOGIN);
+              return;
+            }
             const portal = via === 'sso' && sso.enabled ? portalOf(sso.portalUrl) : null;
             window.location.assign(endedUrl('idle', portal));
             return;
@@ -205,7 +231,7 @@ export function SessionKeeper({ sso, via }: { sso: SsoConfig; via?: string }) {
       window.clearInterval(timer);
       for (const ev of ACTIVITY_EVENTS) window.removeEventListener(ev, seen, { capture: true });
     };
-  }, [sso, via]);
+  }, [sso, via, client]);
 
   return null;
 }

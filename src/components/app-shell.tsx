@@ -31,6 +31,7 @@ export function AppShell({
   sso,
   via,
   ssoSub,
+  client,
   children,
 }: {
   role: AppRole;
@@ -46,6 +47,8 @@ export function AppShell({
   via?: string;
   /** whose SchoolOS session this one came from, for the guard to check against */
   ssoSub?: string;
+  /** which session windows this one is on — decides where an ended session lands */
+  client?: 'web' | 'pwa';
   children: React.ReactNode;
 }) {
   const nav = navFor(role);
@@ -57,7 +60,7 @@ export function AppShell({
       {/* Both render nothing in the ordinary case, and both are mounted here so
           they cover every signed-in page: the keeper for its timers, the guard
           to catch a session that is still ours but no longer this browser's. */}
-      <SessionKeeper sso={sso} via={via} />
+      <SessionKeeper sso={sso} via={via} client={client} />
       <SessionGuard sso={sso} via={via} ssoSub={ssoSub} />
 
       {/* Sidebar (desktop) */}

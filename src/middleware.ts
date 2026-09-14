@@ -5,6 +5,7 @@ import {
   createSession,
   expCookieOptions,
   identityOf,
+  refusedClient,
   refusedVia,
   sessionCookieOptions,
   sessionExpiresAt,
@@ -59,7 +60,19 @@ function toLogin(req: NextRequest, pathname: string): NextResponse {
  * (it pulls in `server-only`), and moving the platform must stay an .env edit
  * rather than a rebuild.
  */
-function toEnd(req: NextRequest, token: string): NextResponse {
+function toEnd(req: NextRequest, token: string, pathname: string): NextResponse {
+  // An installed app first. Its platform session is measured in weeks and is
+  // almost certainly still alive — our own cookie running out is the only thing
+  // that has happened — so it goes back through our login page, which tries
+  // silent SSO and puts the user straight back on the page they asked for.
+  //
+  // Deliberately toLogin() and not `ended=idle`: that flag holds silent SSO off
+  // for a whole idle window, which is right for a staffroom tab that timed out
+  // and exactly wrong here. And deliberately not the portal, which is the dead
+  // end of trap 4.21 — somebody who IS signed in, shown a sign-in page, left to
+  // find their own way back to this app.
+  if (refusedClient(token) === 'pwa') return toLogin(req, pathname);
+
   const stayHere = refusedVia(token) === 'password' || process.env.SSO_ENABLED === 'false';
   const portal = stayHere ? null : portalOf(process.env.SCHOOLOS_PORTAL_URL);
   if (portal) return signedOut(NextResponse.redirect(new URL(portal, req.nextUrl.origin)));
@@ -89,7 +102,7 @@ export async function middleware(req: NextRequest) {
   // token that was here and is no longer accepted is a session that ended —
   // and a session that ended goes back to the front door, not to a form.
   const claims = await verifySession(token);
-  if (!claims) return toEnd(req, token);
+  if (!claims) return toEnd(req, token, pathname);
 
   const res = NextResponse.next();
   if (shouldRenew(claims)) {
@@ -98,11 +111,20 @@ export async function middleware(req: NextRequest) {
     res.cookies.set(
       SESSION_COOKIE,
       await createSession(identityOf(claims), claims.bornAt),
-      sessionCookieOptions(),
+      // The session's own client, not a default. This is the set-cookie that
+      // trap 4.20 lives in: the login route remembers to pass it and this one
+      // forgets, so a phone's cookie is quietly downgraded to one that dies when
+      // the app is closed — on its very first navigation, by the code meant to
+      // keep it alive.
+      sessionCookieOptions(claims.client),
     );
     // In lockstep with the token, or the browser's renewal timer is counting
     // down to a moment that has already moved.
-    res.cookies.set(SESSION_EXP_COOKIE, String(sessionExpiresAt()), expCookieOptions());
+    res.cookies.set(
+      SESSION_EXP_COOKIE,
+      String(sessionExpiresAt(claims)),
+      expCookieOptions(claims.client),
+    );
   }
   return res;
 }

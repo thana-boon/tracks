@@ -109,7 +109,23 @@ export interface RedeemResult {
   };
   audience?: string;
   expiresAt?: number;
-  absoluteEndsAt?: number;
+  /**
+   * When this SchoolOS session ends however active the user stays (epoch ms).
+   * Does not move for the life of one session, and is `null` when the platform
+   * put no ceiling on it at all — the default for an installed app.
+   *
+   * `null` and `undefined` mean opposite things here: `null` is the platform
+   * answering "no cap", `undefined` is an older Users Service that did not
+   * answer at all and must fall back to our own eight hours. Never write
+   * `absoluteEndsAt ?? null` on its way through — that turns every unanswered
+   * case into a session that quietly never expires.
+   */
+  absoluteEndsAt?: number | null;
+  /**
+   * `web` | `pwa` — which set of session windows the platform put this session
+   * on. Copy it; never re-derive it (trap 4.18).
+   */
+  client?: 'web' | 'pwa';
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

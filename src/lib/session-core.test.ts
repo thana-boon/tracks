@@ -11,6 +11,8 @@ import {
   sessionCookieOptions,
   expCookieOptions,
   PLATFORM_IDLE_SECONDS,
+  PLATFORM_PWA_IDLE_DAYS,
+  refusedClient,
 } from './session-core';
 
 // Every setting is read at call time, not at import time, so this lands before
@@ -193,4 +195,117 @@ test('the absolute cap ends a session however busy it has been', async () => {
     false,
   );
   delete process.env.SESSION_MAX_HOURS;
+});
+
+/** An SSO session, which is the only kind that can be `pwa`. */
+const PWA_USER = { ...user, via: 'sso' as const, ssoSub: 'T00116' };
+
+/**
+ * Trap 4.19, which is the expensive sibling of the one above.
+ *
+ * `client` and `capAt` are what size the next token's clocks. Drop either on a
+ * renewal and the phone's session is re-minted as a fifteen-minute desktop one —
+ * so the thing that exists to keep somebody signed in becomes the thing that
+ * signs them out, on their first navigation, and only after it has worked
+ * correctly for a while. Read from the outside that is "my phone is fine for a
+ * bit and then starts logging me out every fifteen minutes", which is close to
+ * unfindable without this test.
+ */
+test('an installed app stays an installed app across a renewal', async () => {
+  const born = Math.floor(Date.now() / 1000) - 600;
+  const cap = Date.now() + 14 * 24 * 3600 * 1000;
+  const first = await verifySession(
+    await createSession({ ...PWA_USER, client: 'pwa', capAt: cap }, born),
+  );
+  assert.ok(first);
+  assert.equal(first.client, 'pwa');
+  assert.equal(first.capAt, cap);
+
+  // Renewed exactly as the middleware and /api/auth/renew do it — through
+  // identityOf, which is the only reason those call sites cannot disagree.
+  const renewed = await verifySession(await createSession(identityOf(first), first.bornAt));
+  assert.ok(renewed);
+  assert.equal(renewed.client, 'pwa', 'a renewed pwa session must not become a web one');
+  assert.equal(renewed.capAt, cap, 'the platform ceiling must not be recomputed as ours');
+  assert.equal(renewed.ssoSub, 'T00116');
+  assert.ok(
+    renewed.exp - Math.floor(Date.now() / 1000) > 24 * 3600,
+    'the renewed window must still be days, not the fifteen-minute one',
+  );
+});
+
+/**
+ * `null` and `undefined` are opposite answers and the whole reason `capAt` is
+ * copied rather than defaulted anywhere on its way in. `null` is the platform
+ * saying "this session has no ceiling" — the normal case for an installed app.
+ * `undefined` is an older Users Service that said nothing, which must fall back
+ * to our own eight hours rather than silently becoming a session that never
+ * ends.
+ */
+test('no ceiling and no answer are not the same thing', async () => {
+  const longAgo = Math.floor(Date.now() / 1000) - 25 * 3600;
+
+  const uncapped = await verifySession(
+    await createSession({ ...PWA_USER, client: 'pwa', capAt: null }, longAgo),
+  );
+  assert.ok(uncapped, 'capAt:null means the platform put no ceiling on it');
+
+  const silent = await createSession({ ...PWA_USER, client: 'pwa' }, longAgo);
+  assert.equal(
+    await verifySession(silent),
+    null,
+    'a token with no capAt at all falls back to our own eight hours',
+  );
+});
+
+/**
+ * The cookie half of the same bug (trap 4.20). An installed app is closed and
+ * reopened all day; a cookie with no max-age is thrown away on every close, so
+ * the user comes back to a system that has forgotten them while SchoolOS is
+ * still perfectly signed in. A staffroom tab must keep the opposite behaviour:
+ * closing the browser really does mean signed out.
+ */
+test('only an installed app gets a cookie that outlives the browser', () => {
+  assert.equal(sessionCookieOptions().maxAge, undefined, 'default');
+  assert.equal(sessionCookieOptions('web').maxAge, undefined, 'a shared machine');
+  assert.equal(expCookieOptions('web').maxAge, undefined, 'the hint follows the token');
+
+  const pwa = sessionCookieOptions('pwa');
+  assert.ok(typeof pwa.maxAge === 'number' && pwa.maxAge > 24 * 3600, 'an installed app');
+  assert.equal(expCookieOptions('pwa').maxAge, pwa.maxAge, 'the hint follows the token');
+  assert.ok(pwa.maxAge <= 400 * 24 * 3600, 'asking for more than browsers keep is asking for 400');
+});
+
+/** A missing claim must fail towards the shorter window, never the longer one. */
+test('a token that predates all this is read as a shared machine', () => {
+  assert.equal(sessionTtlSeconds(undefined), sessionTtlSeconds('web'));
+  assert.ok(sessionTtlSeconds('pwa') > sessionTtlSeconds('web'));
+});
+
+/**
+ * Clamping exists to stop our session outliving the platform's, and for nothing
+ * else. Clamping ourselves SHORTER than SchoolOS is trap 4.22: the phone is
+ * signed out while the platform is still signed in, and no one looking at either
+ * side can explain why.
+ */
+test('our own idle window never outlives the platform for either client', () => {
+  process.env.SESSION_PWA_IDLE_DAYS = '9999';
+  assert.equal(sessionTtlSeconds('pwa'), PLATFORM_PWA_IDLE_DAYS * 24 * 3600, 'clamped down');
+  process.env.SESSION_PWA_IDLE_DAYS = '7';
+  assert.equal(sessionTtlSeconds('pwa'), 7 * 24 * 3600, 'a school that wants shorter may say so');
+  delete process.env.SESSION_PWA_IDLE_DAYS;
+});
+
+/**
+ * Unverified on purpose, and only ever used to pick between two public pages: an
+ * expired token cannot be verified, and this is the one question still worth
+ * asking about one — whether the browser holding it belongs at the SchoolOS
+ * front door or at our own login page (trap 4.21).
+ */
+test('an expired token still says which ending it deserves', async () => {
+  const spent = Math.floor(Date.now() / 1000) - 25 * 3600;
+  assert.equal(refusedClient(await createSession({ ...PWA_USER, client: 'pwa' }, spent)), 'pwa');
+  assert.equal(refusedClient(await createSession({ ...PWA_USER, client: 'web' }, spent)), 'web');
+  assert.equal(refusedClient(await createSession(PWA_USER, spent)), null, 'no client claim');
+  assert.equal(refusedClient('not-a-token'), null);
 });

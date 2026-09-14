@@ -21,6 +21,7 @@ export default async function AdminLayout({
       sso={ssoConfig()}
       via={user.via}
       ssoSub={user.ssoSub}
+      client={user.client}
     >
       {children}
     </AppShell>

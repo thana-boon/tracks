@@ -17,6 +17,7 @@ export default async function TeacherLayout({ children }: { children: React.Reac
       sso={ssoConfig()}
       via={user.via}
       ssoSub={user.ssoSub}
+      client={user.client}
     >
       {children}
     </AppShell>

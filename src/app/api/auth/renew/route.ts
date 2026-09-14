@@ -37,8 +37,12 @@ export async function POST() {
   const claims = await verifySession(token);
   if (!claims) return NextResponse.json({ error: 'expired' }, { status: 401 });
 
-  // The identity only: `iat`/`exp` are minted fresh, `bornAt` is not.
-  await setSessionCookie(await createSession(identityOf(claims), claims.bornAt));
+  // The identity only: `iat`/`exp` are minted fresh, `bornAt` is not. One
+  // identity for both the token and the cookie around it, so the two cannot
+  // disagree about which windows this session is on.
+  const identity = identityOf(claims);
+  const timing = { ...identity, bornAt: claims.bornAt };
+  await setSessionCookie(await createSession(identity, claims.bornAt), timing);
 
-  return NextResponse.json({ ok: true, expiresAt: sessionExpiresAt() });
+  return NextResponse.json({ ok: true, expiresAt: sessionExpiresAt(timing) });
 }

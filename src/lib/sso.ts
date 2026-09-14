@@ -119,7 +119,24 @@ export async function resolveSsoLogin(code: string): Promise<LoginOutcome> {
    * are the same string today, and relying on that quietly is how the two drift
    * apart and the check silently starts passing everyone.
    */
-  if (outcome.ok && outcome.user) outcome.user.ssoSub = (sub || personCode).trim();
+  if (outcome.ok && outcome.user) {
+    outcome.user.ssoSub = (sub || personCode).trim();
+    /**
+     * Which session windows the platform put this one on, and when it ends however
+     * active the user stays — both copied straight off the redeem payload.
+     *
+     * Copied, never re-derived. Sniffing a User-Agent or reading `display-mode`
+     * here is trap 4.18: the phone that signed in through a browser would be
+     * treated as an installed app by us and as a plain tab by SchoolOS, and the
+     * longer of the two windows is the one we would have invented for ourselves.
+     *
+     * `absoluteEndsAt` goes through raw. `?? null` here would turn an older Users
+     * Service that says nothing at all into a session with no ceiling, which is
+     * the opposite of what silence means (see SessionUser.capAt).
+     */
+    outcome.user.client = redeemed.client;
+    outcome.user.capAt = redeemed.absoluteEndsAt;
+  }
   return outcome;
 }
 

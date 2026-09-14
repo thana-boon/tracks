@@ -8,6 +8,7 @@ import {
   sessionCookieOptions,
   sessionExpiresAt,
   verifySession,
+  type SessionClient,
   type SessionUser,
 } from './session-core';
 
@@ -53,10 +54,18 @@ export async function getSession(): Promise<SessionUser | null> {
  * up renewing a session that has already gone, or never renewing one that is
  * about to.
  */
-export async function setSessionCookie(token: string): Promise<void> {
+export async function setSessionCookie(
+  token: string,
+  session: { client?: SessionClient; capAt?: number | null; bornAt?: number },
+): Promise<void> {
   const store = await cookies();
-  store.set(SESSION_COOKIE, token, sessionCookieOptions());
-  store.set(SESSION_EXP_COOKIE, String(sessionExpiresAt()), expCookieOptions());
+  // The identity is asked for rather than optional, so that adding a new place
+  // that writes a session is a compile error until it says which windows the
+  // session is on. The alternative — a default — is trap 4.20: one forgotten
+  // call site silently downgrades a phone's cookie to one that dies when the app
+  // is closed, and nothing anywhere reads as wrong.
+  store.set(SESSION_COOKIE, token, sessionCookieOptions(session.client));
+  store.set(SESSION_EXP_COOKIE, String(sessionExpiresAt(session)), expCookieOptions(session.client));
 }
 
 export async function clearSessionCookie(): Promise<void> {

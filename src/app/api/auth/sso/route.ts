@@ -61,7 +61,7 @@ export async function POST(req: Request) {
   }
 
   const user = outcome.user;
-  await setSessionCookie(await createSession(user));
+  await setSessionCookie(await createSession(user), user);
   await logActivity(user, 'login', user.role, { ip, via: 'sso' });
 
   return NextResponse.json({

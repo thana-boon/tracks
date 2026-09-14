@@ -23,6 +23,24 @@ export type AppRole = 'admin' | 'teacher' | 'student';
  */
 export type SessionVia = 'sso' | 'password';
 
+/**
+ * Which set of session windows this one is on — decided by SchoolOS, never here.
+ *
+ * `web` is a browser tab on a school machine: fifteen minutes of idle and a
+ * cookie that dies when the browser closes. `pwa` is the platform installed as
+ * an app on somebody's own phone, and gets a window of weeks plus a cookie with
+ * a real max-age, because an installed app that asks for a password every time
+ * it is reopened is one nobody keeps installed.
+ *
+ * This app cannot work out which it is looking at and must not try. The claim is
+ * stamped into the platform's token at login and reaches us in the handoff
+ * redeem payload, so the only correct thing to do with it is copy it. Sniffing a
+ * User-Agent or reading `display-mode` here is how the phone stays signed in at
+ * SchoolOS and gets thrown out of this app — two systems holding two opinions
+ * about one session.
+ */
+export type SessionClient = 'web' | 'pwa';
+
 export interface SessionUser {
   /** stable subject: `admin:<id>` or `person:<personId>` */
   sub: string;
@@ -52,6 +70,32 @@ export interface SessionUser {
    * session standing behind it, so there is nothing to be the same as.
    */
   ssoSub?: string;
+  /**
+   * `web` | `pwa`, copied from the platform. Absent on every token minted before
+   * this app understood the distinction, and absent is read as `web` — the
+   * shorter, safer window, which is the right way for a missing claim to fail.
+   */
+  client?: SessionClient;
+  /**
+   * The moment this session ends however active the user stays (epoch MS, not
+   * seconds — it is copied verbatim from the platform's `absoluteEndsAt`).
+   * `null` means the platform put no ceiling on it at all, which is the default
+   * for an installed app.
+   *
+   * Copied rather than computed, because the platform's ceiling is not one
+   * number: 24 hours for an account with `users:write`, weeks for everybody
+   * else, and none at all where the school has switched it off. Re-deriving any
+   * of that from settings of our own means two systems disagreeing about when a
+   * session ends, and the user meets whichever is shorter without being told
+   * why.
+   *
+   * `undefined` and `null` mean opposite things and must never be collapsed:
+   * `null` is the platform saying "no cap", `undefined` is a token that predates
+   * this field and falls back to `bornAt` plus our own ceiling. Writing
+   * `absoluteEndsAt ?? null` anywhere on its way here turns every old session
+   * into one that never expires.
+   */
+  capAt?: number | null;
 }
 
 /** A verified session: who they are, plus the two clocks the renewal runs on. */
@@ -82,6 +126,21 @@ function secret(): Uint8Array {
 export const PLATFORM_IDLE_SECONDS = 15 * 60;
 
 /**
+ * The platform's idle window for an INSTALLED app (Users: SESSION_PWA_IDLE_DAYS).
+ *
+ * The same ceiling as PLATFORM_IDLE_SECONDS and for the same reason — ours may
+ * not outlive SchoolOS's — but for the other kind of client. Thirty days is what
+ * the platform's own compose file settles on; a school that lowers it there
+ * should lower SESSION_PWA_IDLE_DAYS here to match, and if the two ever disagree
+ * the clamp means we end first, never last.
+ *
+ * Clamping is only ever for that. Setting a ceiling here that is SHORTER than
+ * the platform's is its own bug: the phone is signed out while SchoolOS is still
+ * perfectly signed in, and nothing on either side can explain why.
+ */
+export const PLATFORM_PWA_IDLE_DAYS = 30;
+
+/**
  * How long a token lives with no activity — the idle timeout.
  *
  * The only clock there is. It used to be spelled twice — once here and once as
@@ -94,7 +153,18 @@ export const PLATFORM_IDLE_SECONDS = 15 * 60;
  * a deployment that never sets it is then correct by default instead of
  * outliving SchoolOS by eleven and three-quarter hours.
  */
-export function sessionTtlSeconds(): number {
+export function sessionTtlSeconds(client?: SessionClient): number {
+  // An installed app on somebody's own phone is a different question from a tab
+  // on a shared staffroom PC, and answering only the second is what threw phones
+  // out mid-use: the phone locks itself in a pocket and is reopened thirty times
+  // a day, so fifteen minutes there is not security, it is a password prompt
+  // every time the screen wakes.
+  if (client === 'pwa') {
+    const n = Number(process.env.SESSION_PWA_IDLE_DAYS ?? PLATFORM_PWA_IDLE_DAYS);
+    const days =
+      Number.isFinite(n) && n > 0 ? Math.min(n, PLATFORM_PWA_IDLE_DAYS) : PLATFORM_PWA_IDLE_DAYS;
+    return Math.round(days * 24 * 3600);
+  }
   const raw = (process.env.JWT_EXPIRES_IN ?? '15m').trim();
   const m = /^(\d+)\s*([smhd]?)$/i.exec(raw);
   if (!m) return PLATFORM_IDLE_SECONDS;
@@ -134,8 +204,37 @@ export function sessionMaxSeconds(): number {
  * a hint for the browser's renewal timer, never an authority. The token's own
  * `exp` is what actually ends the session.
  */
-export function sessionExpiresAt(): number {
-  return Date.now() + sessionTtlSeconds() * 1000;
+/**
+ * The moment a session must end no matter what (epoch MS), or null when nothing
+ * caps it.
+ *
+ * One place, because three call sites ask it — minting, verifying, and deciding
+ * whether a renewal is worth making — and a disagreement between them is a
+ * session that either outlives its ceiling or is refused before reaching it.
+ *
+ * `capAt` wins when the platform gave us one, `null` included: that is a real
+ * answer meaning "no ceiling", and it must not be confused with the `undefined`
+ * of a token minted before this existed, which falls back to `bornAt` plus our
+ * own eight hours.
+ */
+export function sessionCapAt(claims: { capAt?: number | null; bornAt?: number }): number | null {
+  if (claims.capAt !== undefined) return claims.capAt;
+  return typeof claims.bornAt === 'number'
+    ? (claims.bornAt + sessionMaxSeconds()) * 1000
+    : null;
+}
+
+export function sessionExpiresAt(claims?: {
+  client?: SessionClient;
+  capAt?: number | null;
+  bornAt?: number;
+}): number {
+  const idleEnd = Date.now() + sessionTtlSeconds(claims?.client) * 1000;
+  const cap = claims ? sessionCapAt(claims) : null;
+  // Never past the ceiling. A hint written beyond it would have the browser's
+  // renewal timer counting down to a moment the token itself can never reach,
+  // and verifySession would refuse the session before the countdown got there.
+  return cap === null ? idleEnd : Math.min(idleEnd, cap);
 }
 
 /** Mint a token. `bornAt` carries the original login time through renewals. */
@@ -144,10 +243,17 @@ export async function createSession(
   bornAt?: number,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({ ...user, typ: 'session', bornAt: bornAt ?? now })
+  const born = bornAt ?? now;
+  // Sized from the session's own client, so renewing a `pwa` session mints
+  // another one. The window cannot quietly shrink to fifteen minutes halfway
+  // through a phone's week because one call site forgot to pass the claim along
+  // — that is what identityOf() is for.
+  const idleEnd = now + sessionTtlSeconds(user.client);
+  const cap = sessionCapAt({ capAt: user.capAt, bornAt: born });
+  return new SignJWT({ ...user, typ: 'session', bornAt: born })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt(now)
-    .setExpirationTime(now + sessionTtlSeconds())
+    .setExpirationTime(cap === null ? idleEnd : Math.min(idleEnd, Math.floor(cap / 1000)))
     .sign(secret());
 }
 
@@ -159,7 +265,11 @@ export async function verifySession(token: string): Promise<SessionClaims | null
     // Pre-`bornAt` tokens are still in flight when this ships; treat their issue
     // time as the birth so nobody is thrown out mid-afternoon by the upgrade.
     if (typeof claims.bornAt !== 'number') claims.bornAt = claims.iat;
-    if (claims.bornAt + sessionMaxSeconds() < Math.floor(Date.now() / 1000)) return null;
+    // The absolute ceiling — the platform's own where it gave us one, otherwise
+    // `bornAt` plus ours. A token carrying `capAt: null` is deliberately not
+    // capped at all: that is the platform saying so, not a value going missing.
+    const cap = sessionCapAt(claims);
+    if (cap !== null && cap < Date.now()) return null;
     return claims;
   } catch {
     return null;
@@ -188,6 +298,31 @@ export function refusedVia(token: string): SessionVia | null {
 }
 
 /**
+ * Which windows a token that has ALREADY been refused was on.
+ *
+ * Unverified, for the same reason and with the same limits as refusedVia: an
+ * expired token cannot be verified, this picks between two public pages, and its
+ * answer must never reach an authorisation decision.
+ *
+ * It exists because the two clients deserve different endings. A staffroom tab
+ * that idled out belongs at the SchoolOS front door: the timeout was the point,
+ * and signing back in is a deliberate act. A phone does not — its platform
+ * session is measured in weeks and is almost certainly still alive, so our
+ * cookie expiring is the only thing that happened. Sending it to the portal is a
+ * dead end that reads as a bug: the user is signed in, is shown a sign-in page,
+ * and has to find their own way back to this app. Our own login page lets silent
+ * SSO put them straight back where they were.
+ */
+export function refusedClient(token: string): SessionClient | null {
+  try {
+    const client = decodeJwt(token).client;
+    return client === 'pwa' || client === 'web' ? client : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The identity out of a verified token, with the clocks left behind — what a
  * renewal re-signs.
  *
@@ -208,6 +343,12 @@ export function identityOf(claims: SessionClaims): SessionUser {
     personId: claims.personId,
     via: claims.via,
     ssoSub: claims.ssoSub,
+    // Both of these size the next token's clocks. Drop either on a renewal and a
+    // phone's session silently becomes a fifteen-minute desktop one on the first
+    // navigation — the very thing that was meant to keep it alive is then what
+    // ends it.
+    client: claims.client,
+    capAt: claims.capAt,
   };
 }
 
@@ -217,8 +358,11 @@ export function identityOf(claims: SessionClaims): SessionUser {
  */
 export function shouldRenew(claims: SessionClaims): boolean {
   const now = Math.floor(Date.now() / 1000);
-  if (claims.bornAt + sessionMaxSeconds() <= now + 60) return false; // no point
-  return now - claims.iat >= sessionTtlSeconds() / 2;
+  const cap = sessionCapAt(claims);
+  if (cap !== null && cap <= (now + 60) * 1000) return false; // no point
+  // Sized from the session's own client, so a `pwa` token is not re-signed on
+  // every single navigation for the fortnight before its half-life.
+  return now - claims.iat >= sessionTtlSeconds(claims.client) / 2;
 }
 
 /**
@@ -243,14 +387,38 @@ export function shouldRenew(claims: SessionClaims): boolean {
  * outlives its token buys the holder nothing but a redirect to the login page.
  * The old Max-Age was only ever tidiness.
  */
-export function sessionCookieOptions() {
-  return {
+/**
+ * Chrome and the browsers built on it silently clamp any cookie expiry to 400
+ * days, so asking for longer quietly gets 400 anyway. Ask for what we will get.
+ */
+const MAX_COOKIE_SECONDS = 400 * 24 * 3600;
+
+/** ชนิดที่ประกาศไว้ตรง ๆ เพื่อให้ `maxAge` เป็น optional ของผลลัพธ์เดียว ไม่ใช่ union
+ * สองแบบที่ผู้เรียกต้องมานั่งแยกเอง */
+export function sessionCookieOptions(client?: SessionClient): {
+  httpOnly: boolean;
+  sameSite: 'lax';
+  secure: boolean;
+  path: string;
+  maxAge?: number;
+} {
+  const base = {
     httpOnly: true,
     sameSite: 'lax' as const,
     // Secure unless explicitly turned off for a plain-HTTP LAN deployment.
     secure: process.env.COOKIE_SECURE !== 'false',
     path: '/',
   };
+  if (client !== 'pwa') return base;
+  // An installed app is closed and reopened all day, and a cookie with no
+  // max-age is thrown away on every close — so the user comes back to a system
+  // that has forgotten them while SchoolOS, whose own `pwa` cookie carries a
+  // real one, is still perfectly signed in. Nothing about that reads as a
+  // timeout to the person holding the phone; it reads as being logged out at
+  // random. This costs nothing in enforcement: both clocks live in the token's
+  // claims and are re-checked on every request, so they hold whatever the
+  // browser chooses to keep.
+  return { ...base, maxAge: Math.min(sessionTtlSeconds(client), MAX_COOKIE_SECONDS) };
 }
 
 /**
@@ -259,6 +427,6 @@ export function sessionCookieOptions() {
  * `httpOnly: false`: being readable from JavaScript is the entire point of it
  * (see SESSION_EXP_COOKIE).
  */
-export function expCookieOptions() {
-  return { ...sessionCookieOptions(), httpOnly: false };
+export function expCookieOptions(client?: SessionClient) {
+  return { ...sessionCookieOptions(client), httpOnly: false };
 }
