@@ -7,7 +7,8 @@ import type { DocSettings } from './doc-settings';
 import type { StudentTranscript, TranscriptGroup, TranscriptLine } from './transcript';
 
 /**
- * ทรานสคริปต์วิชาเสริม — one A4 page per student, always exactly one.
+ * ทรานสคริปต์วิชาเสริม — one A4 page per student, always exactly one, with the
+ * ผลการเรียน set in two side-by-side columns the way ปพ.1 lays it out.
  *
  * The page is a fixed frame (หัวกระดาษ, ประวัตินักเรียน, ช่องลงนาม) around a
  * table whose height is the only thing that varies, so fitting three years of
@@ -94,14 +95,7 @@ const s = StyleSheet.create({
   },
   bandText: { fontWeight: 700, textAlign: 'center' },
 
-  // One column across the page: room for the longest ชื่อวิชา without wrapping.
-  cNo: { width: 24, textAlign: 'center' },
-  cCode: { width: 66, paddingLeft: 5 },
-  cName: { flex: 1, paddingLeft: 5 },
-  cYear: { width: 62, textAlign: 'center' },
-  cResult: { width: 74, textAlign: 'center', fontWeight: 600 },
-
-  // Side by side: every fixed column is pared back to what its content actually
+  // Every fixed column is pared back to what its content actually
   // measures in Sarabun at 9.5pt — "ยอดเยี่ยม" 36pt, "PRE110" 30pt, a 2-digit
   // year 11pt — so all the slack goes to ชื่อวิชา, which is the column that
   // decides whether the longest subject name has to be shrunk to fit.
@@ -152,25 +146,18 @@ function flatten(groups: TranscriptGroup[]): Row[] {
 }
 
 /**
- * The most rows a single column may hold — the last `density` tier that still
- * sets 8.5pt. Past it one column would have to drop to 7.5pt, which is where
- * Thai vowel marks start closing up in print, so the table splits into two
- * columns instead and goes back up to 9.5-10pt. A ม.6 leaver with three years
- * of accumulated subjects lands well past this, and two columns is also how
- * ปพ.1 lays out a Thai transcript.
- */
-const SINGLE_COLUMN_MAX = 33;
-
-/**
- * Split rows into two balanced columns. A กลุ่มวิชา cut by the split has its
- * band repeated at the top of the second column marked "(ต่อ)", so no วิชา is
- * ever left sitting under no heading at all.
+ * Split rows into two balanced columns — always two, like ปพ.1, so a sheet
+ * with a handful of subjects and one with 40 read as the same form. A
+ * กลุ่มวิชา cut by the split has its band repeated at the top of the second
+ * column marked "(ต่อ)", so no วิชา is ever left sitting under no heading.
  */
 function splitColumns(rows: Row[]): [Row[], Row[]] {
   let cut = Math.ceil(rows.length / 2);
   // Never end a column on a band — a heading with nothing under it reads as a
-  // group the student took no subjects in.
-  while (cut > 1 && rows[cut - 1].kind === 'band') cut -= 1;
+  // group the student took no subjects in. A transcript too short to split
+  // (one band, one วิชา) stays whole in the left column.
+  while (cut > 0 && rows[cut - 1].kind === 'band') cut -= 1;
+  if (cut === 0) return [rows, []];
 
   const left = rows.slice(0, cut);
   const right = rows.slice(cut);
@@ -190,9 +177,11 @@ function splitColumns(rows: Row[]): [Row[], Row[]] {
  * Row height and type size for the tallest column. The table has roughly 500pt
  * of height to spend; each tier keeps rows × rowH inside that, with enough
  * slack left over to absorb the occasional ชื่อวิชา that wraps to two lines.
+ * Type tops out at 9.5pt, the size the fixed columns were measured at — a
+ * short transcript gets roomier rows, not larger text.
  */
 function density(rowsPerColumn: number) {
-  if (rowsPerColumn <= 20) return { rowH: 21, font: 10, band: 19 };
+  if (rowsPerColumn <= 20) return { rowH: 20, font: 9.5, band: 18 };
   if (rowsPerColumn <= 24) return { rowH: 17.5, font: 9.5, band: 16 };
   if (rowsPerColumn <= 28) return { rowH: 15, font: 9, band: 14 };
   if (rowsPerColumn <= 33) return { rowH: 12.5, font: 8.5, band: 12 };
@@ -227,31 +216,20 @@ type Density = ReturnType<typeof density>;
 
 /**
  * Points left for ชื่อวิชา once the fixed columns and the cell padding are
- * taken out of the table width. A4 less the page's 40pt margins is 515.28;
- * two columns also give up the 12pt gutter between them.
+ * taken out of one column's width. A4 less the page's 40pt margins is 515.28,
+ * less the 12pt gutter between the two columns.
  */
-const NAME_WIDTH = {
-  wide: 515.28 - (24 + 66 + 62 + 74) - 7,
-  narrow: (515.28 - 12) / 2 - (14 + 36 + 24 + 42) - 7,
-} as const;
+const NAME_WIDTH = (515.28 - 12) / 2 - (14 + 36 + 24 + 42) - 7;
 
-/** The column widths in play, chosen by whether the table is split in two. */
-function cols(narrow: boolean) {
-  return narrow
-    ? { no: s.nNo, code: s.nCode, name: s.nName, year: s.nYear, result: s.nResult }
-    : { no: s.cNo, code: s.cCode, name: s.cName, year: s.cYear, result: s.cResult };
-}
-
-function TableHead({ d, narrow }: { d: Density; narrow: boolean }) {
-  const c = cols(narrow);
+function TableHead({ d }: { d: Density }) {
   const cell = { fontSize: d.font };
   return (
     <View style={[s.tr, s.th, { minHeight: d.rowH + 2 }]}>
-      <Text style={[c.no, cell]}>ที่</Text>
-      <Text style={[c.code, cell]}>รหัสวิชา</Text>
-      <Text style={[c.name, cell]}>ชื่อวิชา</Text>
-      <Text style={[c.year, cell]}>{narrow ? 'ปี' : 'ปีการศึกษา'}</Text>
-      <Text style={[c.result, cell]}>{narrow ? 'ผล' : 'ผลการเรียน'}</Text>
+      <Text style={[s.nNo, cell]}>ที่</Text>
+      <Text style={[s.nCode, cell]}>รหัสวิชา</Text>
+      <Text style={[s.nName, cell]}>ชื่อวิชา</Text>
+      <Text style={[s.nYear, cell]}>ปี</Text>
+      <Text style={[s.nResult, cell]}>ผล</Text>
     </View>
   );
 }
@@ -259,20 +237,20 @@ function TableHead({ d, narrow }: { d: Density; narrow: boolean }) {
 function Column({
   rows,
   d,
-  narrow,
   nameFont,
+  children,
 }: {
   rows: Row[];
   d: Density;
-  narrow: boolean;
   nameFont: number;
+  children?: React.ReactNode;
 }) {
-  const c = cols(narrow);
   const cell = { fontSize: d.font };
   const nameCell = { fontSize: nameFont };
   return (
     <View style={s.table}>
-      <TableHead d={d} narrow={narrow} />
+      <TableHead d={d} />
+      {children}
       {rows.map((r, i) => {
         const last = i === rows.length - 1 ? s.trLast : {};
         if (r.kind === 'band')
@@ -289,11 +267,11 @@ function Column({
         const l = r.line;
         return (
           <View key={`l${i}`} style={[s.tr, { minHeight: d.rowH }, last]}>
-            <Text style={[c.no, cell]}>{r.no}</Text>
-            <Text style={[c.code, cell]}>{l.subjectCode}</Text>
-            <Text style={[c.name, nameCell]}>{thai(l.subjectName)}</Text>
-            <Text style={[c.year, cell]}>{narrow ? l.year.slice(-2) : l.year}</Text>
-            <Text style={[c.result, cell, { fontWeight: resultWeight[l.overall] }]}>
+            <Text style={[s.nNo, cell]}>{r.no}</Text>
+            <Text style={[s.nCode, cell]}>{l.subjectCode}</Text>
+            <Text style={[s.nName, nameCell]}>{thai(l.subjectName)}</Text>
+            <Text style={[s.nYear, cell]}>{l.year.slice(-2)}</Text>
+            <Text style={[s.nResult, cell, { fontWeight: resultWeight[l.overall] }]}>
               {OVERALL_LABEL[l.overall]}
             </Text>
           </View>
@@ -306,17 +284,14 @@ function Column({
 function StudentPage({ t, settings }: { t: StudentTranscript; settings: DocSettings }) {
   const { student, groups } = t;
 
-  // One column while it can still be set at a readable size; two beyond that.
-  const rows = flatten(groups);
-  const narrow = rows.length > SINGLE_COLUMN_MAX;
-  const columns = narrow ? splitColumns(rows) : [rows];
+  const columns = splitColumns(flatten(groups));
   const d = density(Math.max(...columns.map((c) => c.length)));
 
   // Set every ชื่อวิชา at one size — the largest that keeps the longest of them
   // on a single line, so rows stay the height the one-page fit assumes.
   const nameFont = fitFontSize(
     groups.flatMap((g) => g.lines.map((l) => thai(l.subjectName))),
-    narrow ? NAME_WIDTH.narrow : NAME_WIDTH.wide,
+    NAME_WIDTH,
     d.font,
     Math.max(6, d.font - 2.5),
   );
@@ -363,20 +338,15 @@ function StudentPage({ t, settings }: { t: StudentTranscript; settings: DocSetti
         </View>
       </View>
 
-      {groups.length === 0 ? (
-        <View style={[s.tableRow]}>
-          <View style={s.table}>
-            <TableHead d={d} narrow={false} />
-            <Text style={s.empty}>ยังไม่มีวิชาเสริมที่ผ่านเกณฑ์การประเมิน</Text>
-          </View>
-        </View>
-      ) : (
-        <View style={s.tableRow}>
-          {columns.map((rows, i) => (
-            <Column key={i} rows={rows} d={d} narrow={narrow} nameFont={nameFont} />
-          ))}
-        </View>
-      )}
+      <View style={s.tableRow}>
+        {columns.map((rows, i) => (
+          <Column key={i} rows={rows} d={d} nameFont={nameFont}>
+            {i === 0 && groups.length === 0 ? (
+              <Text style={s.empty}>ยังไม่มีวิชาเสริมที่ผ่านเกณฑ์การประเมิน</Text>
+            ) : null}
+          </Column>
+        ))}
+      </View>
 
       {t.passedCount > 0 ? (
         <Text style={s.summary}>
