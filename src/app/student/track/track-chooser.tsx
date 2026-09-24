@@ -124,22 +124,59 @@ function useServerClock(serverNow: string, boundaries: number[]): Date {
 }
 
 /**
+ * The นับถอยหลัง box's colours by how close the deadline is: the page header's
+ * purple and gold while there is time, amber under a day, red under an hour.
+ * Fixed colours rather than theme tokens — white text sits on all three in
+ * light and dark alike, the way it does on the header above.
+ */
+const COUNTDOWN_THEME: Record<
+  CountdownUrgency,
+  { bg: string; glow: string; chip: string; seconds: string; bar: string }
+> = {
+  calm: {
+    bg: 'from-[#2a1547] via-[#5b2d8e] to-[#7a3fc0]',
+    glow: 'bg-[#F5C518]/30',
+    chip: 'bg-[#F5C518] text-[#241b04]',
+    seconds: 'text-[#F5C518]',
+    bar: 'bg-gradient-to-r from-[#F5C518] to-[#ffe27a]',
+  },
+  soon: {
+    bg: 'from-[#5a2d00] via-[#9a5a00] to-[#c98300]',
+    glow: 'bg-[#ffe27a]/35',
+    chip: 'bg-white text-[#7a4a00]',
+    seconds: 'text-[#ffe27a]',
+    bar: 'bg-gradient-to-r from-[#ffe27a] to-white',
+  },
+  urgent: {
+    bg: 'from-[#5f0f1f] via-[#b91c1c] to-[#ea580c]',
+    glow: 'bg-[#fdba74]/40',
+    chip: 'bg-white text-[#b91c1c]',
+    seconds: 'text-[#fed7aa]',
+    bar: 'bg-gradient-to-r from-[#fed7aa] to-white',
+  },
+};
+
+/**
  * นับถอยหลัง — the big box over the list, so the time left is the first thing
  * a นักเรียน reads rather than a date they have to subtract from today.
  */
 function Countdown({
   label,
   target,
+  from,
   at,
   hint,
 }: {
   label: string;
   target: Date;
+  /** where the window began — draws the bar of time used up, when known */
+  from?: Date | null;
   at: Date;
   hint?: string;
 }) {
   const ms = target.getTime() - at.getTime();
   const urgency = countdownUrgency(ms);
+  const theme = COUNTDOWN_THEME[urgency];
   const { days, hours, minutes, seconds } = countdownParts(ms);
   const cells: [number, string][] = [
     ...(days ? ([[days, 'วัน']] as [number, string][]) : []),
@@ -147,49 +184,88 @@ function Countdown({
     [minutes, 'นาที'],
     [seconds, 'วินาที'],
   ];
+  const span = from ? target.getTime() - from.getTime() : 0;
+  const leftShare = span > 0 ? Math.min(1, Math.max(0, ms / span)) : null;
+
   return (
-    <Card
+    <section
       role="timer"
+      aria-label={`${label} ${countdownText(ms)}`}
       className={cn(
-        'p-4 sm:p-5',
-        urgency === 'urgent'
-          ? 'border-destructive/40 bg-destructive/5'
-          : urgency === 'soon'
-            ? 'border-accent/60 bg-accent/10'
-            : '',
+        'anim-fade-up relative overflow-hidden rounded-2xl bg-gradient-to-br p-5 text-white shadow-lg sm:p-6',
+        theme.bg,
       )}
     >
-      <p
+      {/* the same slow glow the page header and login screen drift with */}
+      <span
+        aria-hidden
         className={cn(
-          'flex items-center gap-1.5 text-sm',
-          urgency === 'calm' ? 'font-medium' : URGENCY_TEXT[urgency],
+          'pointer-events-none absolute -right-16 -top-20 size-64 rounded-full blur-3xl [animation:aurora-drift_14s_ease-in-out_infinite]',
+          theme.glow,
         )}
-      >
-        <Timer className="size-4.5 shrink-0" strokeWidth={1.8} />
-        {label}
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {cells.map(([n, unit]) => (
-          <div
-            key={unit}
-            className="min-w-16 rounded-xl border border-border bg-card px-3 py-2 text-center"
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -bottom-24 -left-10 size-56 rounded-full bg-white/10 blur-3xl [animation:aurora-drift_18s_ease-in-out_infinite_reverse]"
+      />
+
+      <div className="relative">
+        <p className="flex items-center gap-2">
+          <span
+            className={cn(
+              'grid size-8 place-items-center rounded-lg',
+              theme.chip,
+              urgency === 'urgent' && 'animate-pulse',
+            )}
           >
-            <p
-              className={cn(
-                'text-2xl font-semibold tabular-nums',
-                urgency === 'urgent' ? 'text-destructive' : '',
-              )}
-            >
-              {unit === 'วัน' ? n : String(n).padStart(2, '0')}
-            </p>
-            <p className="text-xs text-muted-foreground">{unit}</p>
+            <Timer className="size-4.5" strokeWidth={2} />
+          </span>
+          <span className="text-base font-semibold">{label}</span>
+        </p>
+
+        <div className="mt-4 flex flex-wrap items-center gap-1.5 sm:gap-2.5">
+          {cells.map(([n, unit], i) => (
+            <div key={unit} className="flex items-center gap-1.5 sm:gap-2.5">
+              {i > 0 ? (
+                <span aria-hidden className="pb-5 text-2xl font-light text-white/40">
+                  :
+                </span>
+              ) : null}
+              <div className="min-w-16 rounded-xl border border-white/20 bg-white/10 px-3 py-2.5 text-center backdrop-blur-sm sm:min-w-20">
+                <p
+                  // Keyed by value so each new second lands with a small pop.
+                  key={unit === 'วินาที' ? n : undefined}
+                  className={cn(
+                    'text-3xl font-bold leading-none tabular-nums sm:text-4xl',
+                    unit === 'วินาที' ? cn('anim-scale-in', theme.seconds) : 'text-white',
+                  )}
+                >
+                  {unit === 'วัน' ? n : String(n).padStart(2, '0')}
+                </p>
+                <p className="mt-1.5 text-xs text-white/70">{unit}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {leftShare !== null ? (
+          <div
+            aria-hidden
+            className="mt-4 h-2 overflow-hidden rounded-full bg-white/15"
+            title="เวลาที่เหลือ"
+          >
+            <div
+              className={cn('h-full rounded-full transition-[width] duration-1000', theme.bar)}
+              style={{ width: `${leftShare * 100}%` }}
+            />
           </div>
-        ))}
+        ) : null}
+
+        <p className="mt-3 text-xs text-white/75">
+          ถึง {thaiDateTimeLongOf(target)} น.{hint ? ` — ${hint}` : ''}
+        </p>
       </div>
-      <p className="mt-2.5 text-xs text-muted-foreground">
-        ถึง {thaiDateTimeLongOf(target)} น.{hint ? ` — ${hint}` : ''}
-      </p>
-    </Card>
+    </section>
   );
 }
 
@@ -267,6 +343,10 @@ export function TrackChooser({
     <Countdown
       label={sameClose ? 'เหลือเวลาเลือก Track' : 'Track แรกจะปิดรับในอีก'}
       target={soonestClose}
+      from={
+        openWindows.find((w) => w.closesAt?.getTime() === soonestClose.getTime())?.opensAt ??
+        null
+      }
       at={at}
       hint={sameClose ? undefined : 'แต่ละ Track ปิดรับไม่พร้อมกัน ดูเวลาที่แต่ละ Track'}
     />
