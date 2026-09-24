@@ -1,6 +1,12 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, count, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { trackGroups, trackSubjects } from '@/db/schema';
+import {
+  classroomStudents,
+  classrooms,
+  people,
+  trackGroups,
+  trackSubjects,
+} from '@/db/schema';
 import { activeYear } from '@/lib/years';
 import { requireCatalogEditor } from '@/lib/authz';
 import { checkedDayKeys, yearSchedule } from '@/lib/schedule';
@@ -13,6 +19,7 @@ import {
   type ScheduleSection,
   type ScheduleSubject,
   type ScheduleTrackGroup,
+  type ScheduleSavedGroup,
 } from './schedule-manager';
 
 export const metadata = { title: 'ตารางเรียนทั้งปี' };
@@ -78,7 +85,22 @@ export default async function SchedulePage() {
   // same way จัดนักเรียนเข้าวิชา builds its "ดึงรายชื่อจาก Track" chips; a
   // moderator places no นักเรียน, so gets none.
   const trackGroupsOffered: ScheduleTrackGroup[] = [];
+  let savedGroups: ScheduleSavedGroup[] = [];
   if (user.role === 'admin') {
+    // กลุ่มเรียนพิเศษ saved on จัดนักเรียนเข้าวิชา — counted as the action will
+    // place them: นักเรียน still studying only.
+    savedGroups = await db
+      .select({ id: classrooms.id, name: classrooms.name, studentCount: count(people.id) })
+      .from(classrooms)
+      .leftJoin(classroomStudents, eq(classroomStudents.classroomId, classrooms.id))
+      .leftJoin(
+        people,
+        and(eq(classroomStudents.studentId, people.id), eq(people.status, 'studying')),
+      )
+      .where(eq(classrooms.yearId, year.id))
+      .groupBy(classrooms.id, classrooms.name)
+      .orderBy(asc(classrooms.name));
+
     for (const semester of SEMESTERS) {
       const [defined, chosen] = await Promise.all([
         tracksForTerm(year.id, semester),
@@ -124,6 +146,7 @@ export default async function SchedulePage() {
       subjects={subjects as ScheduleSubject[]}
       sections={allSections}
       trackGroups={trackGroupsOffered}
+      savedGroups={savedGroups}
       // จัดนักเรียนเข้าวิชา is a ผู้ดูแล screen; a moderator gets no link to it.
       canRegister={user.role === 'admin'}
     />

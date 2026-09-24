@@ -80,13 +80,23 @@ export interface ScheduleTrackGroup {
   studentCount: number;
 }
 
+/** A กลุ่มเรียนพิเศษ saved on จัดนักเรียนเข้าวิชา, offered the same way. */
+export interface ScheduleSavedGroup {
+  id: number;
+  name: string;
+  studentCount: number;
+}
+
 /** What the add form is holding before it is saved. */
 interface Draft {
   subjectId: number | null;
   /** an existing รอบ, or null for "เปิดกลุ่มใหม่" */
   sectionId: number | null;
-  /** with sectionId null: open the new กลุ่ม from this Track's นักเรียน */
-  trackKey: string | null;
+  /**
+   * with sectionId null: open the new กลุ่ม with the นักเรียน of
+   * "track:<ScheduleTrackGroup.key>" or "room:<ScheduleSavedGroup.id>"
+   */
+  sourceKey: string | null;
   newName: string;
   room: string;
   dates: string[];
@@ -95,7 +105,7 @@ interface Draft {
 const EMPTY_DRAFT: Draft = {
   subjectId: null,
   sectionId: null,
-  trackKey: null,
+  sourceKey: null,
   newName: '',
   room: '',
   dates: [],
@@ -118,6 +128,7 @@ export function ScheduleManager({
   subjects,
   sections,
   trackGroups,
+  savedGroups,
   canRegister,
 }: {
   yearLabel: string;
@@ -126,8 +137,9 @@ export function ScheduleManager({
   groups: ScheduleGroup[];
   subjects: ScheduleSubject[];
   sections: ScheduleSection[];
-  /** empty for a moderator — only a ผู้ดูแล places นักเรียน */
+  /** these two are empty for a moderator — only a ผู้ดูแล places นักเรียน */
   trackGroups: ScheduleTrackGroup[];
+  savedGroups: ScheduleSavedGroup[];
   /** ผู้ดูแล only — whether to offer the link to จัดนักเรียนเข้าวิชา */
   canRegister: boolean;
 }) {
@@ -159,6 +171,7 @@ export function ScheduleManager({
         subjects={subjects}
         sections={sections}
         trackGroups={trackGroups}
+        savedGroups={savedGroups}
         onDone={() => {
           setDraft(EMPTY_DRAFT);
           router.refresh();
@@ -180,7 +193,7 @@ export function ScheduleManager({
           setDraft({
             subjectId: s.subjectId,
             sectionId: s.id,
-            trackKey: null,
+            sourceKey: null,
             newName: '',
             room: s.room ?? '',
             dates: [],
@@ -234,6 +247,7 @@ function AddRow({
   subjects,
   sections,
   trackGroups,
+  savedGroups,
   onDone,
 }: {
   draft: Draft;
@@ -242,6 +256,7 @@ function AddRow({
   subjects: ScheduleSubject[];
   sections: ScheduleSection[];
   trackGroups: ScheduleTrackGroup[];
+  savedGroups: ScheduleSavedGroup[];
   onDone: () => void;
 }) {
   const [saving, setSaving] = useState(false);
@@ -262,7 +277,36 @@ function AddRow({
     const own = trackGroups.filter((t) => t.groupIds.includes(subject.groupId));
     return [own, trackGroups.filter((t) => !own.includes(t))];
   }, [trackGroups, subject]);
-  const pickedTrack = trackGroups.find((t) => t.key === draft.trackKey) ?? null;
+  // The Track or กลุ่มเรียนพิเศษ the new กลุ่ม takes its นักเรียน from, if any.
+  const picked = useMemo(() => {
+    const key = draft.sourceKey;
+    if (draft.sectionId !== null || !key) return null;
+    if (key.startsWith('track:')) {
+      const t = trackGroups.find((x) => `track:${x.key}` === key);
+      return t
+        ? {
+            label: t.label,
+            studentCount: t.studentCount,
+            who: `นักเรียนที่เลือก ${t.label}`,
+            source: {
+              kind: 'track' as const,
+              semester: t.semester,
+              trackId: t.trackId,
+              optionId: t.optionId,
+            },
+          }
+        : null;
+    }
+    const g = savedGroups.find((x) => `room:${x.id}` === key);
+    return g
+      ? {
+          label: g.name,
+          studentCount: g.studentCount,
+          who: `นักเรียนในกลุ่ม “${g.name}”`,
+          source: { kind: 'classroom' as const, classroomId: g.id },
+        }
+      : null;
+  }, [draft.sectionId, draft.sourceKey, trackGroups, savedGroups]);
 
   function toggleDate(d: string) {
     onDraft({
@@ -290,14 +334,7 @@ function AddRow({
       newSectionName: draft.newName,
       room: draft.room,
       dates: draft.dates,
-      track:
-        draft.sectionId === null && pickedTrack
-          ? {
-              semester: pickedTrack.semester,
-              trackId: pickedTrack.trackId,
-              optionId: pickedTrack.optionId,
-            }
-          : null,
+      source: picked?.source ?? null,
     });
     setSaving(false);
     if (r.ok) {
@@ -355,7 +392,7 @@ function AddRow({
                 subjectId: e.target.value ? Number(e.target.value) : null,
                 // A กลุ่ม belongs to one วิชา — changing the วิชา cannot keep it.
                 sectionId: null,
-                trackKey: null,
+                sourceKey: null,
                 newName: '',
                 room: '',
               })
@@ -381,15 +418,14 @@ function AddRow({
           <Label htmlFor="sc-section">กลุ่มที่เรียน</Label>
           <Select
             id="sc-section"
-            value={
-              draft.sectionId ?? (draft.trackKey ? `track:${draft.trackKey}` : 'new')
-            }
+            value={draft.sectionId ?? draft.sourceKey ?? 'new'}
             onChange={(e) => {
               const v = e.target.value;
+              const isSource = v.startsWith('track:') || v.startsWith('room:');
               onDraft({
                 ...draft,
-                sectionId: v === 'new' || v.startsWith('track:') ? null : Number(v),
-                trackKey: v.startsWith('track:') ? v.slice('track:'.length) : null,
+                sectionId: v === 'new' || isSource ? null : Number(v),
+                sourceKey: isSource ? v : null,
               });
             }}
             disabled={!subject}
@@ -421,6 +457,15 @@ function AddRow({
                 </optgroup>
               ) : null,
             )}
+            {savedGroups.length ? (
+              <optgroup label="กลุ่มเรียนพิเศษที่สร้างไว้">
+                {savedGroups.map((g) => (
+                  <option key={g.id} value={`room:${g.id}`}>
+                    {g.name} · {g.studentCount} คน
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
             <option value="new">
               {forSubject.length === 0 ? '— ยังไม่มีกลุ่ม: เปิดกลุ่มใหม่ —' : '+ เปิดกลุ่มใหม่'}
             </option>
@@ -437,8 +482,9 @@ function AddRow({
         </Button>
       </div>
 
-      {/* Opening a new กลุ่ม only asks for what a กลุ่ม cannot be without — the
-          rest (นักเรียน) is the other screen's job, and this one says so. */}
+      {/* Opening a new กลุ่ม only asks for what a กลุ่ม cannot be without. Its
+          นักเรียน come from the Track or กลุ่มเรียนพิเศษ picked above, or else
+          from the other screen, and this panel says which. */}
       {subject && draft.sectionId === null ? (
         <div className="grid gap-3 border-t border-border/60 bg-secondary/20 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end sm:px-5">
           <div className="min-w-0">
@@ -450,8 +496,8 @@ function AddRow({
               value={draft.newName}
               onChange={(e) => onDraft({ ...draft, newName: e.target.value })}
               placeholder={
-                pickedTrack
-                  ? `เว้นว่างได้ — ใช้ชื่อ “${pickedTrack.label}”`
+                picked
+                  ? `เว้นว่างได้ — ใช้ชื่อ “${picked.label}”`
                   : 'เช่น ม.4 กลุ่มเรียนที่ 1 — เว้นว่างได้ ระบบตั้งจากวันเรียนให้'
               }
             />
@@ -466,8 +512,8 @@ function AddRow({
             />
           </div>
           <p className="text-xs text-muted-foreground sm:pb-3">
-            {pickedTrack
-              ? `ใส่นักเรียนที่เลือก ${pickedTrack.label} ไว้ ${pickedTrack.studentCount} คนให้เลย — คนที่อยู่กลุ่มอื่นของวิชานี้แล้วจะคงอยู่ที่เดิม`
+            {picked
+              ? `ใส่${picked.who} ${picked.studentCount} คนให้เลย — คนที่อยู่กลุ่มอื่นของวิชานี้แล้วจะคงอยู่ที่เดิม`
               : 'กลุ่มใหม่จะยังไม่มีนักเรียน — เลือกนักเรียนต่อที่หน้าจัดนักเรียนเข้าวิชา'}
           </p>
         </div>
