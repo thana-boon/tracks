@@ -32,12 +32,14 @@ import {
   THAI_WEEKDAYS_SHORT,
 } from '@/lib/utils';
 import type { ScheduleRow } from '@/lib/schedule';
+import { groupTint } from '@/lib/group-color';
 import { addClassDays, moveClassDay, removeClassDay } from './actions';
 
 export interface ScheduleGroup {
   id: number;
   code: string;
   name: string;
+  color: string | null;
 }
 
 export interface ScheduleSubject {
@@ -50,6 +52,7 @@ export interface ScheduleSubject {
   groupId: number;
   groupCode: string;
   groupName: string;
+  groupColor: string | null;
 }
 
 /** A รอบเรียน of this year as the third field offers it. */
@@ -61,17 +64,42 @@ export interface ScheduleSection {
   studentCount: number;
 }
 
+/**
+ * นักเรียนที่เลือก Track เอง — one สาย, or one แขนง of it, of one ภาคเรียน,
+ * offered in the third field as a กลุ่ม to open with those นักเรียน already in.
+ */
+export interface ScheduleTrackGroup {
+  key: string;
+  semester: number;
+  trackId: number;
+  optionId: number | null;
+  /** "TrackSM" or "TrackSM · กฎหมาย" — also the name the new กลุ่ม gets */
+  label: string;
+  /** กลุ่มวิชา the สาย/แขนง leads to — its entries are listed first for their วิชา */
+  groupIds: number[];
+  studentCount: number;
+}
+
 /** What the add form is holding before it is saved. */
 interface Draft {
   subjectId: number | null;
   /** an existing รอบ, or null for "เปิดกลุ่มใหม่" */
   sectionId: number | null;
+  /** with sectionId null: open the new กลุ่ม from this Track's นักเรียน */
+  trackKey: string | null;
   newName: string;
   room: string;
   dates: string[];
 }
 
-const EMPTY_DRAFT: Draft = { subjectId: null, sectionId: null, newName: '', room: '', dates: [] };
+const EMPTY_DRAFT: Draft = {
+  subjectId: null,
+  sectionId: null,
+  trackKey: null,
+  newName: '',
+  room: '',
+  dates: [],
+};
 
 /**
  * ตารางเรียนทั้งปี — the year's class days as one list, and a three-field form
@@ -89,6 +117,8 @@ export function ScheduleManager({
   groups,
   subjects,
   sections,
+  trackGroups,
+  canRegister,
 }: {
   yearLabel: string;
   rows: ScheduleRow[];
@@ -96,6 +126,10 @@ export function ScheduleManager({
   groups: ScheduleGroup[];
   subjects: ScheduleSubject[];
   sections: ScheduleSection[];
+  /** empty for a moderator — only a ผู้ดูแล places นักเรียน */
+  trackGroups: ScheduleTrackGroup[];
+  /** ผู้ดูแล only — whether to offer the link to จัดนักเรียนเข้าวิชา */
+  canRegister: boolean;
 }) {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const router = useRouter();
@@ -104,7 +138,7 @@ export function ScheduleManager({
   if (subjects.length === 0) {
     return (
       <div className="space-y-6">
-        <Header yearLabel={yearLabel} />
+        <Header yearLabel={yearLabel} canRegister={canRegister} />
         <EmptyState
           icon={<CalendarRange className="size-8" strokeWidth={1.5} />}
           title="ยังไม่มีวิชาเสริมที่เปิดใช้งาน"
@@ -116,7 +150,7 @@ export function ScheduleManager({
 
   return (
     <div className="space-y-6">
-      <Header yearLabel={yearLabel} />
+      <Header yearLabel={yearLabel} canRegister={canRegister} />
 
       <AddRow
         draft={draft}
@@ -124,6 +158,7 @@ export function ScheduleManager({
         groups={groups}
         subjects={subjects}
         sections={sections}
+        trackGroups={trackGroups}
         onDone={() => {
           setDraft(EMPTY_DRAFT);
           router.refresh();
@@ -145,6 +180,7 @@ export function ScheduleManager({
           setDraft({
             subjectId: s.subjectId,
             sectionId: s.id,
+            trackKey: null,
             newName: '',
             room: s.room ?? '',
             dates: [],
@@ -155,7 +191,7 @@ export function ScheduleManager({
   );
 }
 
-function Header({ yearLabel }: { yearLabel: string }) {
+function Header({ yearLabel, canRegister }: { yearLabel: string; canRegister: boolean }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -165,17 +201,19 @@ function Header({ yearLabel }: { yearLabel: string }) {
           ใช้ข้อมูลชุดเดียวกับหน้าจัดนักเรียนเข้าวิชา แก้ที่ไหนก็ตรงกันทั้งสองหน้า
         </p>
       </div>
-      <Link
-        href="/admin/register"
-        className="group inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2.5 text-sm font-medium transition-colors hover:border-primary/35 hover:bg-secondary/60"
-      >
-        <ClipboardPen className="size-4.5 text-muted-foreground" strokeWidth={1.8} />
-        ไปหน้าจัดนักเรียนเข้าวิชา
-        <ArrowUpRight
-          className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
-          strokeWidth={1.8}
-        />
-      </Link>
+      {canRegister ? (
+        <Link
+          href="/admin/register"
+          className="group inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2.5 text-sm font-medium transition-colors hover:border-primary/35 hover:bg-secondary/60"
+        >
+          <ClipboardPen className="size-4.5 text-muted-foreground" strokeWidth={1.8} />
+          ไปหน้าจัดนักเรียนเข้าวิชา
+          <ArrowUpRight
+            className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+            strokeWidth={1.8}
+          />
+        </Link>
+      ) : null}
     </div>
   );
 }
@@ -195,6 +233,7 @@ function AddRow({
   groups,
   subjects,
   sections,
+  trackGroups,
   onDone,
 }: {
   draft: Draft;
@@ -202,6 +241,7 @@ function AddRow({
   groups: ScheduleGroup[];
   subjects: ScheduleSubject[];
   sections: ScheduleSection[];
+  trackGroups: ScheduleTrackGroup[];
   onDone: () => void;
 }) {
   const [saving, setSaving] = useState(false);
@@ -215,6 +255,14 @@ function AddRow({
         .sort((a, b) => compareClassLabels(a.name, b.name)),
     [sections, draft.subjectId],
   );
+  // The สาย that lead to this วิชา's กลุ่มวิชา come first — they are nearly
+  // always the one wanted — but every other สาย stays pickable below them.
+  const [ownTracks, otherTracks] = useMemo(() => {
+    if (!subject) return [[], []];
+    const own = trackGroups.filter((t) => t.groupIds.includes(subject.groupId));
+    return [own, trackGroups.filter((t) => !own.includes(t))];
+  }, [trackGroups, subject]);
+  const pickedTrack = trackGroups.find((t) => t.key === draft.trackKey) ?? null;
 
   function toggleDate(d: string) {
     onDraft({
@@ -242,6 +290,14 @@ function AddRow({
       newSectionName: draft.newName,
       room: draft.room,
       dates: draft.dates,
+      track:
+        draft.sectionId === null && pickedTrack
+          ? {
+              semester: pickedTrack.semester,
+              trackId: pickedTrack.trackId,
+              optionId: pickedTrack.optionId,
+            }
+          : null,
     });
     setSaving(false);
     if (r.ok) {
@@ -299,6 +355,7 @@ function AddRow({
                 subjectId: e.target.value ? Number(e.target.value) : null,
                 // A กลุ่ม belongs to one วิชา — changing the วิชา cannot keep it.
                 sectionId: null,
+                trackKey: null,
                 newName: '',
                 room: '',
               })
@@ -324,21 +381,46 @@ function AddRow({
           <Label htmlFor="sc-section">กลุ่มที่เรียน</Label>
           <Select
             id="sc-section"
-            value={draft.sectionId ?? 'new'}
-            onChange={(e) =>
+            value={
+              draft.sectionId ?? (draft.trackKey ? `track:${draft.trackKey}` : 'new')
+            }
+            onChange={(e) => {
+              const v = e.target.value;
               onDraft({
                 ...draft,
-                sectionId: e.target.value === 'new' ? null : Number(e.target.value),
-              })
-            }
+                sectionId: v === 'new' || v.startsWith('track:') ? null : Number(v),
+                trackKey: v.startsWith('track:') ? v.slice('track:'.length) : null,
+              });
+            }}
             disabled={!subject}
           >
-            {forSubject.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-                {s.room ? ` · ${s.room}` : ''} · {s.studentCount} คน
-              </option>
-            ))}
+            {forSubject.length ? (
+              <optgroup label="กลุ่มที่มีอยู่แล้ว">
+                {forSubject.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {s.room ? ` · ${s.room}` : ''} · {s.studentCount} คน
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+            {[
+              { label: 'นักเรียนที่เลือก Track เอง', items: ownTracks },
+              {
+                label: ownTracks.length ? 'นักเรียนที่เลือก Track อื่น' : 'นักเรียนที่เลือก Track เอง',
+                items: otherTracks,
+              },
+            ].map((g) =>
+              g.items.length ? (
+                <optgroup key={g.label} label={g.label}>
+                  {g.items.map((t) => (
+                    <option key={t.key} value={`track:${t.key}`}>
+                      {t.label} · ภาคเรียนที่ {t.semester} · {t.studentCount} คน
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null,
+            )}
             <option value="new">
               {forSubject.length === 0 ? '— ยังไม่มีกลุ่ม: เปิดกลุ่มใหม่ —' : '+ เปิดกลุ่มใหม่'}
             </option>
@@ -367,7 +449,11 @@ function AddRow({
               id="sc-name"
               value={draft.newName}
               onChange={(e) => onDraft({ ...draft, newName: e.target.value })}
-              placeholder="เช่น ม.4 กลุ่มเรียนที่ 1 — เว้นว่างได้ ระบบตั้งจากวันเรียนให้"
+              placeholder={
+                pickedTrack
+                  ? `เว้นว่างได้ — ใช้ชื่อ “${pickedTrack.label}”`
+                  : 'เช่น ม.4 กลุ่มเรียนที่ 1 — เว้นว่างได้ ระบบตั้งจากวันเรียนให้'
+              }
             />
           </div>
           <div className="min-w-0">
@@ -380,7 +466,9 @@ function AddRow({
             />
           </div>
           <p className="text-xs text-muted-foreground sm:pb-3">
-            กลุ่มใหม่จะยังไม่มีนักเรียน — เลือกนักเรียนต่อที่หน้าจัดนักเรียนเข้าวิชา
+            {pickedTrack
+              ? `ใส่นักเรียนที่เลือก ${pickedTrack.label} ไว้ ${pickedTrack.studentCount} คนให้เลย — คนที่อยู่กลุ่มอื่นของวิชานี้แล้วจะคงอยู่ที่เดิม`
+              : 'กลุ่มใหม่จะยังไม่มีนักเรียน — เลือกนักเรียนต่อที่หน้าจัดนักเรียนเข้าวิชา'}
           </p>
         </div>
       ) : null}
@@ -700,9 +788,11 @@ function MonthBlock({
             // The date is printed once per day, not once per line: a day with
             // five วิชา on it reads as one day, the way a timetable does.
             const newDay = i === 0 || rows[i - 1].date !== r.date;
+            const tint = groupTint(r.groupColor);
             return (
               <li
                 key={`${key}:${r.subjectId}`}
+                style={tint ? { backgroundColor: tint.surface.backgroundColor } : undefined}
                 className={cn(
                   'flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 hover:bg-secondary/30 sm:px-5',
                   newDay ? 'border-t border-border/40 first:border-t-0' : '',
@@ -718,7 +808,11 @@ function MonthBlock({
                   {THAI_WEEKDAYS_SHORT[weekdayOfYmd(r.date)]} {thaiDateLong(r.date)}
                 </div>
 
-                <Badge tone="primary" className="shrink-0">
+                <Badge
+                  tone="primary"
+                  className="shrink-0"
+                  style={tint?.chip}
+                >
                   {r.groupCode}
                 </Badge>
                 <span className="shrink-0 text-sm font-medium">{r.subjectCode}</span>

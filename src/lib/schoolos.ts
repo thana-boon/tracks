@@ -74,7 +74,12 @@ export interface Paged<T> {
   page: number;
   pageSize: number;
   total: number;
-  academicYear?: { id: number; year: string };
+  academicYear?: {
+    id: number;
+    year: string;
+    startDate?: string | null;
+    endDate?: string | null;
+  };
 }
 
 export interface VerifyResult {
@@ -207,30 +212,43 @@ export const schoolos = {
   /**
    * The school calendar (scope: years:read). Falls back to the metadata the
    * roster endpoint carries when the key lacks the years scope, so a key with
-   * only students:read still yields the current year.
+   * only students:read still yields the current year — and says so, since
+   * every other year is then invisible to this app.
    */
-  async academicYears(): Promise<SchoolOsAcademicYear[]> {
+  async academicYears(): Promise<{ data: SchoolOsAcademicYear[]; scopeMissing: boolean }> {
     try {
       const res = await request<{ data: SchoolOsAcademicYear[] }>(
         '/api/public/v1/academic-years',
       );
-      return res.data;
+      return { data: res.data, scopeMissing: false };
     } catch (e) {
       if (e instanceof SchoolOsError && e.status === 403) {
         const meta = await this.currentAcademicYear();
-        return meta
-          ? [{ id: meta.id, year: meta.year, startDate: null, endDate: null, isActive: true }]
-          : [];
+        return {
+          data: meta ? [{ ...meta, isActive: true }] : [],
+          scopeMissing: true,
+        };
       }
       throw e;
     }
   },
 
   /** The current academic year from roster metadata (works with students:read). */
-  async currentAcademicYear(): Promise<{ id: number; year: string } | null> {
+  async currentAcademicYear(): Promise<{
+    id: number;
+    year: string;
+    startDate: string | null;
+    endDate: string | null;
+  } | null> {
     const res = await this.students({ pageSize: 1 });
-    return res.academicYear
-      ? { id: res.academicYear.id, year: String(res.academicYear.year) }
+    const y = res.academicYear;
+    return y
+      ? {
+          id: y.id,
+          year: String(y.year),
+          startDate: y.startDate ?? null,
+          endDate: y.endDate ?? null,
+        }
       : null;
   },
 

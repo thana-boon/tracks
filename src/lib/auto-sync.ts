@@ -91,7 +91,8 @@ async function recordState(
 
 function countsMessage(kind: SyncKind, c: SyncCounts): string {
   if (kind === 'homerooms') return `${c.created} รายการ (พบจาก API ${c.total})`;
-  return `เพิ่ม ${c.created}, ปรับปรุง ${c.updated} (ทั้งหมด ${c.total})`;
+  const base = `เพิ่ม ${c.created}, ปรับปรุง ${c.updated} (ทั้งหมด ${c.total})`;
+  return c.note ? `${base} — ${c.note}` : base;
 }
 
 /**

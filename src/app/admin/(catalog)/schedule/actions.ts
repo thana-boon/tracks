@@ -1,11 +1,12 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db';
-import { subjectDates, subjectSections, trackSubjects } from '@/db/schema';
-import { requireRole } from '@/lib/authz';
+import { registrations, subjectDates, subjectSections, trackSubjects } from '@/db/schema';
+import { actorOf, requireCatalogEditor } from '@/lib/authz';
+import { trackChoiceRows, tracksForTerm } from '@/lib/tracks';
 import { activeYear } from '@/lib/years';
 import { dayIsChecked } from '@/lib/schedule';
 import { deriveSectionName } from '@/lib/section-name';
@@ -33,6 +34,19 @@ const AddInput = z.object({
   newSectionName: z.string().trim().max(120).optional().default(''),
   room: z.string().trim().max(120).optional().default(''),
   dates: z.array(z.string()).min(1, 'เลือกวันที่อย่างน้อย 1 วัน'),
+  /**
+   * เปิดกลุ่มจาก Track — the new รอบ takes the นักเรียน who chose this สาย (or
+   * this แขนง of it) for themselves. Only read when sectionId is null.
+   */
+  track: z
+    .object({
+      semester: z.number().int().min(1).max(2),
+      trackId: z.number().int().positive(),
+      optionId: z.number().int().positive().nullable(),
+    })
+    .nullable()
+    .optional()
+    .default(null),
 });
 
 export interface AddDaysResult extends ActionResult {
@@ -53,14 +67,14 @@ export interface AddDaysResult extends ActionResult {
  * whole term to catch two new dates is the normal way this gets used.
  */
 export async function addClassDays(input: z.infer<typeof AddInput>): Promise<AddDaysResult> {
-  const user = await requireRole('admin');
+  const user = await requireCatalogEditor();
   const parsed = AddInput.safeParse(input);
   if (!parsed.success)
     return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
   const year = await activeYear();
   if (!year) return { ok: false, message: 'ยังไม่ได้ซิงก์ปีการศึกษา' };
 
-  const { subjectId, sectionId, newSectionName, room, dates } = parsed.data;
+  const { subjectId, sectionId, newSectionName, room, dates, track } = parsed.data;
 
   const [subject] = await db
     .select({ id: trackSubjects.id, code: trackSubjects.code, active: trackSubjects.active })
@@ -72,6 +86,28 @@ export async function addClassDays(input: z.infer<typeof AddInput>): Promise<Add
 
   const clean = [...new Set(dates.map(normalizeYmd).filter(Boolean) as string[])].sort();
   if (clean.length !== dates.length) return { ok: false, message: 'วันที่ไม่ถูกต้อง' };
+
+  // ── กลุ่มจาก Track ──────────────────────────────────────────
+  // Read back from the นักเรียน's own choices here rather than trusted from the
+  // browser, and only for a ผู้ดูแล: placing นักเรียน in a รอบ is the
+  // จัดนักเรียนเข้าวิชา screen's job, which a moderator does not have.
+  let fromTrack: { label: string; studentIds: number[] } | null = null;
+  if (!sectionId && track) {
+    if (user.role !== 'admin')
+      return { ok: false, message: 'เฉพาะผู้ดูแลที่เปิดกลุ่มจาก Track ได้' };
+    const [defined, chosen] = await Promise.all([
+      tracksForTerm(year.id, track.semester),
+      trackChoiceRows(year.id, track.semester),
+    ]);
+    const t = defined.find((x) => x.id === track.trackId);
+    const o = track.optionId ? t?.options.find((x) => x.id === track.optionId) : null;
+    if (!t || (track.optionId && !o)) return { ok: false, message: 'ไม่พบ Track นี้' };
+    const ids = chosen
+      .filter((c) => c.trackId === t.id && (!o || c.optionId === o.id))
+      .map((c) => c.studentId);
+    if (!ids.length) return { ok: false, message: `ยังไม่มีนักเรียนเลือก ${t.name}` };
+    fromTrack = { label: o ? `${t.name} · ${o.name}` : t.name, studentIds: [...new Set(ids)] };
+  }
 
   let id = sectionId;
   let opened = false;
@@ -92,11 +128,12 @@ export async function addClassDays(input: z.infer<typeof AddInput>): Promise<Add
     if (!section) return { ok: false, message: 'ไม่พบกลุ่มเรียนนี้ในวิชาที่เลือก' };
     label = section.name;
   } else {
-    label = newSectionName || (await deriveSectionName(year.id, subjectId, new Set(), clean, null));
+    const named = newSectionName || fromTrack?.label || '';
+    label = named || (await deriveSectionName(year.id, subjectId, new Set(), clean, null));
     // A รอบ named by hand still has to be unique within its วิชา, or two รอบ
     // would be indistinguishable in every list on every screen.
-    if (newSectionName) {
-      const clash = await db
+    if (named) {
+      const [clash] = await db
         .select({ id: subjectSections.id })
         .from(subjectSections)
         .where(
@@ -107,30 +144,75 @@ export async function addClassDays(input: z.infer<typeof AddInput>): Promise<Add
           ),
         )
         .limit(1);
-      if (clash.length)
+      // The same Track picked again (for more days of its term) means the รอบ
+      // it opened last time — not a refusal, and not a second copy.
+      if (clash && fromTrack) id = clash.id;
+      else if (clash)
         return { ok: false, message: `วิชา ${subject.code} มีกลุ่มชื่อ “${label}” อยู่แล้ว` };
     }
-    const [created] = await db
-      .insert(subjectSections)
-      .values({ subjectId, yearId: year.id, name: label, room: room || null })
-      .returning({ id: subjectSections.id });
-    id = created.id;
-    opened = true;
   }
 
-  const sid = id;
-  const existing = await db
-    .select({ date: subjectDates.date })
-    .from(subjectDates)
-    .where(and(eq(subjectDates.sectionId, sid), inArray(subjectDates.date, clean)));
-  const already = new Set(existing.map((r) => r.date));
-  const toAdd = clean.filter((d) => !already.has(d));
+  // One transaction: a รอบ opened from a Track must not end up with its days
+  // but without its นักเรียน, or the other way round.
+  const actor = actorOf(user);
+  let toAdd: string[] = [];
+  let enrolled = 0;
+  let elsewhere = 0;
+  const sid = await db.transaction(async (tx) => {
+    let sid = id;
+    if (!sid) {
+      const [created] = await tx
+        .insert(subjectSections)
+        .values({ subjectId, yearId: year.id, name: label, room: room || null })
+        .returning({ id: subjectSections.id });
+      sid = created.id;
+      opened = true;
+    }
 
-  if (toAdd.length)
-    await db
-      .insert(subjectDates)
-      .values(toAdd.map((date) => ({ sectionId: sid, date })))
-      .onConflictDoNothing();
+    const existing = await tx
+      .select({ date: subjectDates.date })
+      .from(subjectDates)
+      .where(and(eq(subjectDates.sectionId, sid), inArray(subjectDates.date, clean)));
+    const already = new Set(existing.map((r) => r.date));
+    toAdd = clean.filter((d) => !already.has(d));
+
+    if (toAdd.length)
+      await tx
+        .insert(subjectDates)
+        .values(toAdd.map((date) => ({ sectionId: sid, date })))
+        .onConflictDoNothing();
+
+    if (fromTrack) {
+      // A นักเรียน sits in one รอบ of a วิชา — anyone already placed in this
+      // วิชา, here or in another รอบ, is left where they are.
+      const placed = await tx
+        .select({ studentId: registrations.studentId, sectionId: registrations.sectionId })
+        .from(registrations)
+        .where(
+          and(
+            eq(registrations.subjectId, subjectId),
+            eq(registrations.yearId, year.id),
+            isNull(registrations.droppedAt),
+            inArray(registrations.studentId, fromTrack.studentIds),
+          ),
+        );
+      const taken = new Set(placed.map((r) => r.studentId));
+      const fresh = fromTrack.studentIds.filter((s) => !taken.has(s));
+      elsewhere = placed.filter((r) => r.sectionId !== sid).length;
+      enrolled = fresh.length;
+      if (fresh.length)
+        await tx.insert(registrations).values(
+          fresh.map((studentId) => ({
+            yearId: year.id,
+            subjectId,
+            sectionId: sid,
+            studentId,
+            assignedBy: actor,
+          })),
+        );
+    }
+    return sid;
+  });
 
   await logActivity(user, 'add_class_dates', `section:${sid}`, {
     subject: subject.code,
@@ -138,6 +220,7 @@ export async function addClassDays(input: z.infer<typeof AddInput>): Promise<Add
     added: toAdd.length,
     skipped: clean.length - toAdd.length,
     openedSection: opened,
+    ...(fromTrack ? { track: fromTrack.label, enrolled, elsewhere } : {}),
   });
   revalidateSchedule();
 
@@ -145,6 +228,10 @@ export async function addClassDays(input: z.infer<typeof AddInput>): Promise<Add
   if (opened) parts.push(`เปิดกลุ่ม “${label}”`);
   parts.push(toAdd.length ? `เพิ่มวันเรียน ${toAdd.length} วัน` : 'ไม่มีวันใหม่');
   if (clean.length - toAdd.length > 0) parts.push(`มีอยู่แล้ว ${clean.length - toAdd.length} วัน`);
+  if (fromTrack) {
+    parts.push(`ใส่นักเรียนจาก Track ${enrolled} คน`);
+    if (elsewhere) parts.push(`อยู่กลุ่มอื่นของวิชานี้แล้ว ${elsewhere} คน`);
+  }
   return { ok: true, message: `${subject.code} · ${parts.join(' · ')}`, sectionId: sid };
 }
 
@@ -163,7 +250,7 @@ const DayInput = z.object({
  * out loud here, because on this screen the day *is* the row being pressed.
  */
 export async function removeClassDay(input: z.infer<typeof DayInput>): Promise<ActionResult> {
-  const user = await requireRole('admin');
+  const user = await requireCatalogEditor();
   const parsed = DayInput.safeParse(input);
   if (!parsed.success) return { ok: false, message: 'ข้อมูลไม่ถูกต้อง' };
   const date = normalizeYmd(parsed.data.date);
@@ -209,7 +296,7 @@ const MoveInput = z.object({
  * กลุ่ม the line belonged to; moving it in place cannot lose that.
  */
 export async function moveClassDay(input: z.infer<typeof MoveInput>): Promise<ActionResult> {
-  const user = await requireRole('admin');
+  const user = await requireCatalogEditor();
   const parsed = MoveInput.safeParse(input);
   if (!parsed.success) return { ok: false, message: 'ข้อมูลไม่ถูกต้อง' };
   const from = normalizeYmd(parsed.data.from);

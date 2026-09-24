@@ -15,11 +15,13 @@ export interface SyncCounts {
   created: number;
   updated: number;
   total: number;
+  /** said after the counts on the ซิงก์ status line — a success with a catch */
+  note?: string;
 }
 
 /** Mirror the school calendar. The active year follows the Users Service. */
 export async function syncYears(): Promise<SyncCounts> {
-  const years = await schoolos.academicYears();
+  const { data: years, scopeMissing } = await schoolos.academicYears();
   let created = 0;
   let updated = 0;
 
@@ -56,7 +58,16 @@ export async function syncYears(): Promise<SyncCounts> {
       .where(inArray(academicYears.schoolosId, activeIds.slice(0, 1)));
   }
 
-  return { created, updated, total: years.length };
+  return {
+    created,
+    updated,
+    total: years.length,
+    // Without years:read only the current year can be learned, and the other
+    // years the Users Service has would never show up with nothing said why.
+    ...(scopeMissing
+      ? { note: 'API key ไม่มีสิทธิ์ years:read จึงได้เฉพาะปีปัจจุบัน — เพิ่มสิทธิ์นี้ให้ key ใน SchoolOS' }
+      : {}),
+  };
 }
 
 /**

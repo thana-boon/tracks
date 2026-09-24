@@ -2,14 +2,17 @@ import { asc, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { trackGroups, trackSubjects } from '@/db/schema';
 import { activeYear } from '@/lib/years';
+import { requireCatalogEditor } from '@/lib/authz';
 import { checkedDayKeys, yearSchedule } from '@/lib/schedule';
 import { listSections, studentCountsBySection } from '@/lib/data';
+import { SEMESTERS, trackChoiceRows, tracksForTerm } from '@/lib/tracks';
 import { NeedYear } from '@/components/ui';
 import {
   ScheduleManager,
   type ScheduleGroup,
   type ScheduleSection,
   type ScheduleSubject,
+  type ScheduleTrackGroup,
 } from './schedule-manager';
 
 export const metadata = { title: 'ตารางเรียนทั้งปี' };
@@ -25,6 +28,7 @@ export const metadata = { title: 'ตารางเรียนทั้งป�
  * other — a day added here shows up there, and a day ticked there shows up here.
  */
 export default async function SchedulePage() {
+  const user = await requireCatalogEditor();
   const year = await activeYear();
   if (!year) return <NeedYear />;
 
@@ -42,6 +46,7 @@ export default async function SchedulePage() {
         groupId: trackSubjects.groupId,
         groupCode: trackGroups.code,
         groupName: trackGroups.name,
+        groupColor: trackGroups.color,
       })
       .from(trackSubjects)
       .innerJoin(trackGroups, eq(trackSubjects.groupId, trackGroups.id))
@@ -54,7 +59,7 @@ export default async function SchedulePage() {
   const groups: ScheduleGroup[] = [];
   for (const s of subjects) {
     if (!groups.some((g) => g.id === s.groupId))
-      groups.push({ id: s.groupId, code: s.groupCode, name: s.groupName });
+      groups.push({ id: s.groupId, code: s.groupCode, name: s.groupName, color: s.groupColor });
   }
 
   // Every รอบเรียน of the year, including those with no วันเรียน yet: the third
@@ -68,6 +73,48 @@ export default async function SchedulePage() {
     studentCount: counts.get(s.id) ?? 0,
   }));
 
+  // กลุ่มจาก Track — the นักเรียน who chose a สาย (or one แขนง of it) for
+  // themselves, offered in the third field as a กลุ่ม ready to open. Built the
+  // same way จัดนักเรียนเข้าวิชา builds its "ดึงรายชื่อจาก Track" chips; a
+  // moderator places no นักเรียน, so gets none.
+  const trackGroupsOffered: ScheduleTrackGroup[] = [];
+  if (user.role === 'admin') {
+    for (const semester of SEMESTERS) {
+      const [defined, chosen] = await Promise.all([
+        tracksForTerm(year.id, semester),
+        trackChoiceRows(year.id, semester),
+      ]);
+      for (const t of defined) {
+        const mine = chosen.filter((c) => c.trackId === t.id);
+        if (!mine.length) continue;
+        trackGroupsOffered.push({
+          key: `${semester}:${t.id}`,
+          semester,
+          trackId: t.id,
+          optionId: null,
+          label: t.name,
+          groupIds: [t.groupId, ...t.options.map((o) => o.groupId)].filter(
+            (g): g is number => g != null,
+          ),
+          studentCount: mine.length,
+        });
+        for (const o of t.options) {
+          const n = mine.filter((c) => c.optionId === o.id).length;
+          if (!n) continue;
+          trackGroupsOffered.push({
+            key: `${semester}:${t.id}:${o.id}`,
+            semester,
+            trackId: t.id,
+            optionId: o.id,
+            label: `${t.name} · ${o.name}`,
+            groupIds: [o.groupId ?? t.groupId].filter((g): g is number => g != null),
+            studentCount: n,
+          });
+        }
+      }
+    }
+  }
+
   return (
     <ScheduleManager
       yearLabel={`ปีการศึกษา ${year.year}`}
@@ -76,6 +123,9 @@ export default async function SchedulePage() {
       groups={groups}
       subjects={subjects as ScheduleSubject[]}
       sections={allSections}
+      trackGroups={trackGroupsOffered}
+      // จัดนักเรียนเข้าวิชา is a ผู้ดูแล screen; a moderator gets no link to it.
+      canRegister={user.role === 'admin'}
     />
   );
 }
