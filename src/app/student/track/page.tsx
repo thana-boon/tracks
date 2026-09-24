@@ -141,6 +141,7 @@ export default async function StudentTrackPage({
                 changedByAdmin: choiceByAdmin(choice.chosenBy, choice.changedBy),
                 // Only the open term's choice can be changed; an old one is history.
                 change: isOpenTerm ? standing : null,
+                changeClosesAt: isOpenTerm ? (held?.closesAt?.toISOString() ?? null) : null,
               }
             : null
         }

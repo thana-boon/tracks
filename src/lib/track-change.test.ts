@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { changeNote, changeStanding, choiceByAdmin } from './track-core';
+import {
+  changeNote,
+  changeStanding,
+  choiceByAdmin,
+  countdownParts,
+  countdownText,
+  countdownUrgency,
+} from './track-core';
 import { fromSchoolDateTimeInput } from './utils';
 
 const at = (school: string) => fromSchoolDateTimeInput(school)!;
@@ -49,4 +56,21 @@ test('the last hand on a choice decides who made it', () => {
   assert.equal(choiceByAdmin('admin:1', null), true);
   assert.equal(choiceByAdmin('student:person:7', 'admin:1'), true);
   assert.equal(choiceByAdmin('admin:1', 'student:person:7'), false);
+});
+
+test('countdown reads days, then drops to seconds as it closes', () => {
+  const MIN = 60_000;
+  const H = 60 * MIN;
+  assert.equal(countdownText(2 * 24 * H + 3 * H + 5 * MIN + 9_000), '2 วัน 3 ชั่วโมง 5 นาที');
+  assert.equal(countdownText(H + 30_000), '1 ชั่วโมง 0 นาที 30 วินาที');
+  assert.equal(countdownText(5 * MIN + 1_999), '5 นาที 1 วินาที');
+  assert.equal(countdownText(900), '0 วินาที');
+  assert.equal(countdownText(0), 'หมดเวลาแล้ว');
+  assert.deepEqual(countdownParts(-5), { days: 0, hours: 0, minutes: 0, seconds: 0 });
+});
+
+test('countdown urgency', () => {
+  assert.equal(countdownUrgency(25 * 3_600_000), 'calm');
+  assert.equal(countdownUrgency(23 * 3_600_000), 'soon');
+  assert.equal(countdownUrgency(59 * 60_000), 'urgent');
 });

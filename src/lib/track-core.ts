@@ -254,3 +254,41 @@ export function changeNote(s: ChangeStanding): string {
 export function choiceByAdmin(chosenBy: string, changedBy: string | null): boolean {
   return (changedBy ?? chosenBy).startsWith('admin:');
 }
+
+/** เวลาที่เหลือ แยกเป็นช่อง — what the นับถอยหลัง box shows. */
+export interface CountdownParts {
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+}
+
+export function countdownParts(ms: number): CountdownParts {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return {
+    days: Math.floor(s / 86400),
+    hours: Math.floor((s % 86400) / 3600),
+    minutes: Math.floor((s % 3600) / 60),
+    seconds: s % 60,
+  };
+}
+
+/**
+ * เวลาที่เหลือ in one line, for a row. Seconds only once the days are gone:
+ * "3 วัน 4 ชั่วโมง 12 วินาที" ticking is noise, "12 นาที 30 วินาที" is the point.
+ */
+export function countdownText(ms: number): string {
+  if (ms <= 0) return 'หมดเวลาแล้ว';
+  const { days, hours, minutes, seconds } = countdownParts(ms);
+  if (days) return `${days} วัน ${hours} ชั่วโมง ${minutes} นาที`;
+  if (hours) return `${hours} ชั่วโมง ${minutes} นาที ${seconds} วินาที`;
+  if (minutes) return `${minutes} นาที ${seconds} วินาที`;
+  return `${seconds} วินาที`;
+}
+
+/** How loudly to say it — under a day is worth noticing, under an hour is urgent. */
+export type CountdownUrgency = 'calm' | 'soon' | 'urgent';
+
+export function countdownUrgency(ms: number): CountdownUrgency {
+  return ms < 3_600_000 ? 'urgent' : ms < 86_400_000 ? 'soon' : 'calm';
+}

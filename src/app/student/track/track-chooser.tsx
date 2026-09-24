@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   BookOpen,
@@ -12,6 +12,7 @@ import {
   Lock,
   Repeat,
   Route,
+  Timer,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge, Button, Card, CardHeader, EmptyState, Select } from '@/components/ui';
@@ -20,10 +21,14 @@ import { SubjectList } from '@/components/track-subjects';
 import {
   changeLimitLabel,
   changeNote,
+  countdownParts,
+  countdownText,
+  countdownUrgency,
   termLabel,
   trackPhaseLabel,
   trackWindow,
   type ChangeStanding,
+  type CountdownUrgency,
   type Term,
   type TrackRow,
   type TrackWindow,
@@ -40,6 +45,8 @@ export interface MyChoice {
   changedByAdmin: boolean;
   /** how many changes the held สาย still allows — null outside the open term */
   change: ChangeStanding | null;
+  /** the held สาย's ปิดรับ — the deadline for changing, counted down on the card */
+  changeClosesAt: string | null;
 }
 
 export interface HistoryRow {
@@ -52,12 +59,138 @@ export interface HistoryRow {
 
 /**
  * The line under a สาย's name that says where it stands against the clock —
- * empty for one with no window at all, which needs no explanation.
+ * empty for one with no window at all, which needs no explanation. While the
+ * window is live it counts down, so "ถึง 30 มิ.ย. 16:00" also reads as how
+ * long that actually is.
  */
-function windowNote(w: TrackWindow): string {
-  if (w.state === 'before') return `เปิดให้เลือก ${thaiDateTimeLongOf(w.opensAt)} น.`;
-  if (w.state === 'after') return `หมดเวลาเลือกแล้ว — ปิดรับ ${thaiDateTimeLongOf(w.closesAt)} น.`;
-  return w.closesAt ? `เลือกได้ถึง ${thaiDateTimeLongOf(w.closesAt)} น.` : '';
+function windowNote(w: TrackWindow, at: Date): { text: string; urgency: CountdownUrgency | null } {
+  if (w.state === 'before') {
+    const ms = w.opensAt!.getTime() - at.getTime();
+    return {
+      text: `เปิดให้เลือก ${thaiDateTimeLongOf(w.opensAt)} น. — อีก ${countdownText(ms)}`,
+      urgency: null,
+    };
+  }
+  if (w.state === 'after')
+    return {
+      text: `หมดเวลาเลือกแล้ว — ปิดรับ ${thaiDateTimeLongOf(w.closesAt)} น.`,
+      urgency: null,
+    };
+  if (!w.closesAt) return { text: '', urgency: null };
+  const ms = w.closesAt.getTime() - at.getTime();
+  return {
+    text: `เลือกได้ถึง ${thaiDateTimeLongOf(w.closesAt)} น. — เหลืออีก ${countdownText(ms)}`,
+    urgency: countdownUrgency(ms),
+  };
+}
+
+const URGENCY_TEXT: Record<CountdownUrgency, string> = {
+  calm: 'text-muted-foreground',
+  soon: 'font-medium text-[var(--gold-text)]',
+  urgent: 'font-medium text-destructive',
+};
+
+/**
+ * The server's clock, kept ticking in the browser.
+ *
+ * It runs at the offset between the server's `now` and the device's clock
+ * rather than on the device's clock itself: a phone set ten minutes fast would
+ * otherwise show "หมดเวลา" while the server, which has the final say, is still
+ * taking choices. Crossing any of `boundaries` (a เปิด or ปิดรับ) refreshes the
+ * page, so the list re-renders from the server as the window actually moves.
+ */
+function useServerClock(serverNow: string, boundaries: number[]): Date {
+  const router = useRouter();
+  const [at, setAt] = useState(() => new Date(serverNow));
+  const refresh = useRef(router.refresh);
+  refresh.current = router.refresh;
+  const key = boundaries.join(',');
+
+  useEffect(() => {
+    const offset = Date.parse(serverNow) - Date.now();
+    const marks = key ? key.split(',').map(Number) : [];
+    let last = Date.now() + offset;
+    setAt(new Date(last));
+    const timer = window.setInterval(() => {
+      const t = Date.now() + offset;
+      if (marks.some((m) => last < m && m <= t)) refresh.current();
+      last = t;
+      setAt(new Date(t));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [serverNow, key]);
+
+  return at;
+}
+
+/**
+ * นับถอยหลัง — the big box over the list, so the time left is the first thing
+ * a นักเรียน reads rather than a date they have to subtract from today.
+ */
+function Countdown({
+  label,
+  target,
+  at,
+  hint,
+}: {
+  label: string;
+  target: Date;
+  at: Date;
+  hint?: string;
+}) {
+  const ms = target.getTime() - at.getTime();
+  const urgency = countdownUrgency(ms);
+  const { days, hours, minutes, seconds } = countdownParts(ms);
+  const cells: [number, string][] = [
+    ...(days ? ([[days, 'วัน']] as [number, string][]) : []),
+    [hours, 'ชั่วโมง'],
+    [minutes, 'นาที'],
+    [seconds, 'วินาที'],
+  ];
+  return (
+    <Card
+      role="timer"
+      className={cn(
+        'p-4 sm:p-5',
+        urgency === 'urgent'
+          ? 'border-destructive/40 bg-destructive/5'
+          : urgency === 'soon'
+            ? 'border-accent/60 bg-accent/10'
+            : '',
+      )}
+    >
+      <p
+        className={cn(
+          'flex items-center gap-1.5 text-sm',
+          urgency === 'calm' ? 'font-medium' : URGENCY_TEXT[urgency],
+        )}
+      >
+        <Timer className="size-4.5 shrink-0" strokeWidth={1.8} />
+        {label}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {cells.map(([n, unit]) => (
+          <div
+            key={unit}
+            className="min-w-16 rounded-xl border border-border bg-card px-3 py-2 text-center"
+          >
+            <p
+              className={cn(
+                'text-2xl font-semibold tabular-nums',
+                urgency === 'urgent' ? 'text-destructive' : '',
+              )}
+            >
+              {unit === 'วัน' ? n : String(n).padStart(2, '0')}
+            </p>
+            <p className="text-xs text-muted-foreground">{unit}</p>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2.5 text-xs text-muted-foreground">
+        ถึง {thaiDateTimeLongOf(target)} น.{hint ? ` — ${hint}` : ''}
+      </p>
+    </Card>
+  );
 }
 
 export function TrackChooser({
@@ -96,13 +229,53 @@ export function TrackChooser({
   const unchanged =
     !!choice && selected?.id === choice.trackId && (optionId ?? null) === choice.optionId;
 
-  // ช่วงเวลาเปิด-ปิด, once per render for every สาย. A Track outside its window
+  // Every instant at which something on this page changes state.
+  const boundaries = [
+    ...tracks.flatMap((t) => [t.opensAt, t.closesAt]),
+    choice?.changeClosesAt ?? null,
+  ]
+    .filter((x): x is string => !!x)
+    .map((x) => Date.parse(x))
+    .sort((a, b) => a - b);
+  const at = useServerClock(now, boundaries);
+
+  // ช่วงเวลาเปิด-ปิด, once per tick for every สาย. A Track outside its window
   // is shown rather than hidden: "TrackSM เปิด 1 มิถุนายน" is the answer a
   // นักเรียน came to the page for, and an empty screen is not.
-  const at = new Date(now);
   const windows = new Map(tracks.map((t) => [t.id, trackWindow(t, at)]));
   const selectedOpen = selected ? windows.get(selected.id)?.state === 'open' : false;
   const anyOpen = tracks.some((t) => windows.get(t.id)?.state === 'open');
+
+  // What the big นับถอยหลัง counts to: the soonest ปิดรับ among the สาย open
+  // now, or — before any has opened — the soonest เปิด. Nothing when the open
+  // ones have no ปิดรับ at all; "ไม่มีกำหนด" needs no clock.
+  const openWindows = tracks.map((t) => windows.get(t.id)!).filter((w) => w.state === 'open');
+  const closings = openWindows.map((w) => w.closesAt).filter((d): d is Date => !!d);
+  const soonestClose = closings.length
+    ? new Date(Math.min(...closings.map((d) => d.getTime())))
+    : null;
+  const sameClose =
+    closings.length === openWindows.length &&
+    closings.every((d) => d.getTime() === soonestClose?.getTime());
+  const openings = tracks
+    .map((t) => windows.get(t.id)!)
+    .filter((w) => w.state === 'before' && w.opensAt)
+    .map((w) => w.opensAt!.getTime());
+  const soonestOpen =
+    !openWindows.length && openings.length ? new Date(Math.min(...openings)) : null;
+  const countdown = soonestClose ? (
+    <Countdown
+      label={sameClose ? 'เหลือเวลาเลือก Track' : 'Track แรกจะปิดรับในอีก'}
+      target={soonestClose}
+      at={at}
+      hint={sameClose ? undefined : 'แต่ละ Track ปิดรับไม่พร้อมกัน ดูเวลาที่แต่ละ Track'}
+    />
+  ) : soonestOpen ? (
+    <Countdown label="จะเปิดให้เลือก Track ในอีก" target={soonestOpen} at={at} />
+  ) : null;
+  const changeLeftMs = choice?.changeClosesAt
+    ? Date.parse(choice.changeClosesAt) - at.getTime()
+    : null;
 
   function gotoTerm(value: string) {
     const [yearId, semester] = value.split(':');
@@ -224,6 +397,18 @@ export function TrackChooser({
                   เลือกแล้ว
                 </p>
               )}
+              {canChange && changeLeftMs !== null ? (
+                <p
+                  className={cn(
+                    'mt-1 flex items-center gap-1.5 text-xs',
+                    URGENCY_TEXT[countdownUrgency(changeLeftMs)],
+                  )}
+                >
+                  <Timer className="size-3.5 shrink-0" strokeWidth={1.8} />
+                  แก้ไขได้ถึง {thaiDateTimeLongOf(new Date(choice.changeClosesAt!))} น. — เหลืออีก{' '}
+                  {countdownText(changeLeftMs)}
+                </p>
+              ) : null}
               {choice.changedByAdmin ? (
                 <p className="mt-1 text-xs text-muted-foreground">
                   รายการนี้ถูกปรับโดยฝ่ายวิชาการ
@@ -257,138 +442,146 @@ export function TrackChooser({
           }
         />
       ) : (
-        <Card>
-          <CardHeader
-            icon={<Route className="size-4.5" strokeWidth={1.8} />}
-            title={changing ? 'เปลี่ยน Track' : `เลือก Track ของ${termLabel(term)}`}
-          />
-          <ul className="space-y-2.5 px-4 pb-4 sm:px-5">
-            {tracks.map((t) => {
-              const w = windows.get(t.id)!;
-              const shut = w.state !== 'open';
-              const note = windowNote(w);
-              const on = t.id === trackId;
-              return (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    disabled={shut}
-                    onClick={() => {
-                      setTrackId(t.id);
-                      if (t.id !== trackId) setOptionId(null);
-                    }}
-                    className={cn(
-                      'w-full rounded-xl border px-4 py-3.5 text-left transition-colors',
-                      shut
-                        ? 'cursor-not-allowed border-border bg-secondary/30 opacity-70'
-                        : on
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:bg-secondary/50',
-                    )}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{t.name}</span>
-                      <Badge tone="navy">{trackPhaseLabel(t.phase)}</Badge>
-                      {t.subjects.length ? (
-                        <Badge tone="secondary">{t.subjects.length} วิชา</Badge>
-                      ) : null}
-                      {t.options.length ? (
-                        <Badge tone="secondary">มีข้อย่อย {t.options.length} รายการ</Badge>
-                      ) : null}
-                      {choice?.trackId === t.id ? <Badge tone="primary">ที่เลือกไว้</Badge> : null}
-                    </div>
-                    {t.description ? (
-                      <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
-                    ) : null}
-                    {note ? (
-                      <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <CalendarClock className="size-3.5 shrink-0" strokeWidth={1.8} />
-                        {note}
-                      </p>
-                    ) : null}
-                    {/* Changing spends the held สาย's allowance, not this one's —
-                        so the line is only worth reading before a first choice. */}
-                    {!choice ? (
-                      <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Repeat className="size-3.5 shrink-0" strokeWidth={1.8} />
-                        {changeLimitLabel(t.changeLimit)}
-                      </p>
-                    ) : null}
-                  </button>
-
-                  <div className="mt-1.5 pl-1">
+        <>
+          {countdown}
+          <Card>
+            <CardHeader
+              icon={<Route className="size-4.5" strokeWidth={1.8} />}
+              title={changing ? 'เปลี่ยน Track' : `เลือก Track ของ${termLabel(term)}`}
+            />
+            <ul className="space-y-2.5 px-4 pb-4 sm:px-5">
+              {tracks.map((t) => {
+                const w = windows.get(t.id)!;
+                const shut = w.state !== 'open';
+                const note = windowNote(w, at);
+                const on = t.id === trackId;
+                return (
+                  <li key={t.id}>
                     <button
                       type="button"
-                      onClick={() => setDetail(t)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+                      disabled={shut}
+                      onClick={() => {
+                        setTrackId(t.id);
+                        if (t.id !== trackId) setOptionId(null);
+                      }}
+                      className={cn(
+                        'w-full rounded-xl border px-4 py-3.5 text-left transition-colors',
+                        shut
+                          ? 'cursor-not-allowed border-border bg-secondary/30 opacity-70'
+                          : on
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border hover:bg-secondary/50',
+                      )}
                     >
-                      <Info className="size-3.5" strokeWidth={1.8} />
-                      ดูรายละเอียด — เรียนอะไรบ้าง
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{t.name}</span>
+                        <Badge tone="navy">{trackPhaseLabel(t.phase)}</Badge>
+                        {t.subjects.length ? (
+                          <Badge tone="secondary">{t.subjects.length} วิชา</Badge>
+                        ) : null}
+                        {t.options.length ? (
+                          <Badge tone="secondary">มีข้อย่อย {t.options.length} รายการ</Badge>
+                        ) : null}
+                        {choice?.trackId === t.id ? <Badge tone="primary">ที่เลือกไว้</Badge> : null}
+                      </div>
+                      {t.description ? (
+                        <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
+                      ) : null}
+                      {note.text ? (
+                        <p
+                          className={cn(
+                            'mt-1.5 flex items-center gap-1.5 text-xs',
+                            URGENCY_TEXT[note.urgency ?? 'calm'],
+                          )}
+                        >
+                          <CalendarClock className="size-3.5 shrink-0" strokeWidth={1.8} />
+                          {note.text}
+                        </p>
+                      ) : null}
+                      {/* Changing spends the held สาย's allowance, not this one's —
+                          so the line is only worth reading before a first choice. */}
+                      {!choice ? (
+                        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Repeat className="size-3.5 shrink-0" strokeWidth={1.8} />
+                          {changeLimitLabel(t.changeLimit)}
+                        </p>
+                      ) : null}
                     </button>
-                  </div>
 
-                  {on && !shut && t.options.length ? (
-                    <ul className="mt-2 space-y-2 pl-4">
-                      {t.options.map((o) => {
-                        const picked = o.id === optionId;
-                        return (
-                          <li key={o.id}>
-                            <button
-                              type="button"
-                              onClick={() => setOptionId(o.id)}
-                              className={cn(
-                                'w-full rounded-lg border px-3.5 py-2.5 text-left text-sm transition-colors',
-                                picked
-                                  ? 'border-primary bg-primary/5 font-medium'
-                                  : 'border-border hover:bg-secondary/50',
-                              )}
-                            >
-                              {o.name}
-                              {o.description ? (
-                                <span className="block text-xs font-normal text-muted-foreground">
-                                  {o.description}
-                                </span>
-                              ) : null}
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
-            <p className="text-xs text-muted-foreground">
-              {!anyOpen
-                ? 'ยังไม่ถึงเวลาเลือก หรือหมดเวลาแล้ว — ดูวันเวลาที่แต่ละ Track'
-                : choice?.change
-                  ? `ตรวจสอบให้แน่ใจก่อนกดยืนยัน — ${changeNote(choice.change)}`
-                  : selected
-                    ? `ตรวจสอบให้แน่ใจก่อนกดยืนยัน — ${changeLimitLabel(selected.changeLimit)}`
-                    : 'ตรวจสอบให้แน่ใจก่อนกดยืนยัน'}
-            </p>
-            <div className="flex items-center gap-2">
-              {changing ? (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setChanging(false);
-                    setTrackId(null);
-                    setOptionId(null);
-                  }}
-                  disabled={saving}
-                >
-                  ยกเลิก
+                    <div className="mt-1.5 pl-1">
+                      <button
+                        type="button"
+                        onClick={() => setDetail(t)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+                      >
+                        <Info className="size-3.5" strokeWidth={1.8} />
+                        ดูรายละเอียด — เรียนอะไรบ้าง
+                      </button>
+                    </div>
+
+                    {on && !shut && t.options.length ? (
+                      <ul className="mt-2 space-y-2 pl-4">
+                        {t.options.map((o) => {
+                          const picked = o.id === optionId;
+                          return (
+                            <li key={o.id}>
+                              <button
+                                type="button"
+                                onClick={() => setOptionId(o.id)}
+                                className={cn(
+                                  'w-full rounded-lg border px-3.5 py-2.5 text-left text-sm transition-colors',
+                                  picked
+                                    ? 'border-primary bg-primary/5 font-medium'
+                                    : 'border-border hover:bg-secondary/50',
+                                )}
+                              >
+                                {o.name}
+                                {o.description ? (
+                                  <span className="block text-xs font-normal text-muted-foreground">
+                                    {o.description}
+                                  </span>
+                                ) : null}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
+              <p className="text-xs text-muted-foreground">
+                {!anyOpen
+                  ? 'ยังไม่ถึงเวลาเลือก หรือหมดเวลาแล้ว — ดูวันเวลาที่แต่ละ Track'
+                  : choice?.change
+                    ? `ตรวจสอบให้แน่ใจก่อนกดยืนยัน — ${changeNote(choice.change)}`
+                    : selected
+                      ? `ตรวจสอบให้แน่ใจก่อนกดยืนยัน — ${changeLimitLabel(selected.changeLimit)}`
+                      : 'ตรวจสอบให้แน่ใจก่อนกดยืนยัน'}
+              </p>
+              <div className="flex items-center gap-2">
+                {changing ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setChanging(false);
+                      setTrackId(null);
+                      setOptionId(null);
+                    }}
+                    disabled={saving}
+                  >
+                    ยกเลิก
+                  </Button>
+                ) : null}
+                <Button onClick={submit} disabled={saving || !selected || !selectedOpen || unchanged}>
+                  {changing ? 'ยืนยันการเปลี่ยน' : 'ยืนยันการเลือก'}
                 </Button>
-              ) : null}
-              <Button onClick={submit} disabled={saving || !selected || !selectedOpen || unchanged}>
-                {changing ? 'ยืนยันการเปลี่ยน' : 'ยืนยันการเลือก'}
-              </Button>
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        </>
       )}
 
       {detail ? <TrackDetail track={detail} onClose={() => setDetail(null)} /> : null}
