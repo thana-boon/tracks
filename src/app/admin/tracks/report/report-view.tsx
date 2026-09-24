@@ -3,10 +3,11 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChartPie, Download, Route, Search, Users, UsersRound } from 'lucide-react';
+import { ChartPie, ChevronRight, Download, Route, Search, Users, UsersRound } from 'lucide-react';
+import { Modal } from '@/components/dialog';
 import { Badge, Card, CardHeader, EmptyState, Input, Select } from '@/components/ui';
 import { SEMESTERS, type Term } from '@/lib/track-core';
-import type { ReportStudent, TrackReport } from '@/lib/track-report';
+import type { ReportStudent, TrackReport, TrackTally } from '@/lib/track-report';
 import { cn } from '@/lib/utils';
 
 type Tab = 'tracks' | 'rooms' | 'students';
@@ -164,10 +165,11 @@ function Tile({
   );
 }
 
-/** How many in each สาย, and — opened up — exactly who. */
+/** How many in each สาย, and — clicked — exactly who. */
 function TrackTab({ report }: { report: TrackReport }) {
-  const [open, setOpen] = useState<number | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
   const max = Math.max(1, ...report.tracks.map((t) => t.total));
+  const opened = report.tracks.find((t) => t.id === openId) ?? null;
 
   return (
     <Card>
@@ -181,11 +183,10 @@ function TrackTab({ report }: { report: TrackReport }) {
           const share = report.totals.chosen
             ? Math.round((t.total / report.totals.chosen) * 100)
             : 0;
-          const isOpen = open === t.id;
           return (
             <li key={t.id}>
               <button
-                onClick={() => setOpen(isOpen ? null : t.id)}
+                onClick={() => setOpenId(t.id)}
                 className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-secondary/40 sm:px-5"
               >
                 <div className="min-w-0 flex-1">
@@ -220,25 +221,99 @@ function TrackTab({ report }: { report: TrackReport }) {
                   <p className="text-lg font-semibold tabular-nums">{n(t.total)}</p>
                   <p className="text-xs text-muted-foreground tabular-nums">{share}%</p>
                 </div>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
               </button>
-              {isOpen ? (
-                t.students.length ? (
-                  <ul className="divide-y divide-border/40 border-t border-border/40 bg-secondary/20">
-                    {t.students.map((s) => (
-                      <StudentLine key={s.id} s={s} showOption />
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="border-t border-border/40 bg-secondary/20 px-5 py-6 text-center text-sm text-muted-foreground">
-                    ยังไม่มีนักเรียนเลือกสายนี้
-                  </p>
-                )
-              ) : null}
             </li>
           );
         })}
       </ul>
+      {opened ? <TrackStudentsModal track={opened} onClose={() => setOpenId(null)} /> : null}
     </Card>
+  );
+}
+
+/**
+ * Who chose one สาย, in a dialog rather than a row that unfolds: a popular สาย
+ * runs to a couple of hundred names, and unfolded inline it pushed every สาย
+ * below it off the screen. Here the list scrolls inside the panel and can be
+ * searched and cut by ข้อย่อย.
+ */
+function TrackStudentsModal({ track, onClose }: { track: TrackTally; onClose: () => void }) {
+  const [q, setQ] = useState('');
+  const [optionId, setOptionId] = useState('all');
+
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return track.students.filter((s) => {
+      if (optionId !== 'all' && String(s.optionId) !== optionId) return false;
+      if (!needle) return true;
+      return (
+        s.fullName.toLowerCase().includes(needle) ||
+        s.code.toLowerCase().includes(needle) ||
+        (s.nickname ?? '').toLowerCase().includes(needle) ||
+        `${s.gradeLevel}/${s.classroom}`.includes(needle)
+      );
+    });
+  }, [track.students, q, optionId]);
+
+  return (
+    <Modal onClose={onClose} labelledBy="track-students-title" className="max-w-2xl">
+      <h2 id="track-students-title" className="text-base font-semibold">
+        {track.name}
+      </h2>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        นักเรียนที่เลือก {n(track.total)} คน
+        {shown.length !== track.students.length ? ` · แสดง ${n(shown.length)} คน` : ''}
+      </p>
+
+      {track.students.length ? (
+        <>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <div className="relative min-w-40 flex-1">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                strokeWidth={1.8}
+              />
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="ค้นหาชื่อ / รหัส / ห้อง"
+                className="h-10 pl-9"
+              />
+            </div>
+            {track.options.length ? (
+              <Select
+                value={optionId}
+                onChange={(e) => setOptionId(e.target.value)}
+                className="h-10 w-44"
+              >
+                <option value="all">ทุกข้อย่อย</option>
+                {track.options.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name} ({n(o.count)})
+                  </option>
+                ))}
+              </Select>
+            ) : null}
+          </div>
+          {shown.length ? (
+            <ul className="mt-3 divide-y divide-border/40 overflow-hidden rounded-xl border border-border/60">
+              {shown.map((s) => (
+                <StudentLine key={s.id} s={s} showOption />
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+              ไม่พบนักเรียนตามเงื่อนไข
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+          ยังไม่มีนักเรียนเลือกสายนี้
+        </p>
+      )}
+    </Modal>
   );
 }
 
