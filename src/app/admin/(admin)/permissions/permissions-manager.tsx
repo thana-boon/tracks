@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Search, ShieldPlus, ShieldCheck, ShieldX, Lock, UserPlus, Check } from 'lucide-react';
+import { Search, ShieldPlus, ShieldCheck, ShieldX, Lock, UserPlus, Check, BookOpenCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Card,
@@ -22,6 +22,7 @@ export interface GrantItem {
   code: string;
   fullName: string;
   status: string;
+  role: 'admin' | 'moderator';
   note: string | null;
   grantedByName: string;
   createdAt: Date;
@@ -33,6 +34,19 @@ export interface TeacherItem {
   fullName: string;
   status: string;
 }
+
+/** The two levels a grant can give, in the words the page uses for them. */
+const LEVELS = {
+  admin: {
+    label: 'ผู้ดูแล',
+    blurb: 'เห็นเมนูผู้ดูแลทั้งหมด — จัดการวิชา จัดนักเรียนเข้าเรียน Track ทรานสคริปต์ สำรองข้อมูล และหน้าสิทธิ์นี้',
+  },
+  moderator: {
+    label: 'Moderator',
+    blurb:
+      'ยังเป็นครูตามเดิม และเพิ่มได้เฉพาะ 2 หน้า: วิชาเสริม และ ตารางเรียนทั้งปี — ช่วยเพิ่ม/แก้วิชาและวันเรียน แต่จัดนักเรียน แก้ Track หรือให้สิทธิ์ใครไม่ได้',
+  },
+} as const;
 
 /**
  * สิทธิ์ผู้ดูแล — two lists that must never be confused with each other.
@@ -63,7 +77,7 @@ export function PermissionsManager({
 
   async function revoke(g: GrantItem) {
     const ok = await dialog.confirm({
-      title: `ถอนสิทธิ์ผู้ดูแลของ ${g.fullName}?`,
+      title: `ถอนสิทธิ์${LEVELS[g.role].label}ของ ${g.fullName}?`,
       description:
         'จะกลับไปเป็นครูธรรมดาทันทีในหน้าถัดไปที่เปิด — ข้อมูลและสิทธิ์ในระบบผู้ใช้ (SchoolOS) ไม่ถูกแตะต้อง',
       tone: 'destructive',
@@ -81,20 +95,21 @@ export function PermissionsManager({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">สิทธิ์ผู้ดูแล</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            ดึงครูขึ้นมาเป็นผู้ดูแล <span className="font-medium text-foreground">เฉพาะระบบวิชาเสริมนี้</span> —
+            ดึงครูขึ้นมาเป็นผู้ดูแล หรือ Moderator{' '}
+            <span className="font-medium text-foreground">เฉพาะระบบวิชาเสริมนี้</span> —
             ไม่เขียนกลับไปที่ SchoolOS และไม่กระทบสิทธิ์ผู้ดูแลที่มาจากระบบผู้ใช้
           </p>
         </div>
         <Button onClick={() => setAdding(true)} disabled={free.length === 0}>
           <ShieldPlus className="size-4.5" strokeWidth={1.8} />
-          เพิ่มผู้ดูแล
+          เพิ่มสิทธิ์
         </Button>
       </div>
 
       <Card>
         <CardHeader
           icon={<ShieldCheck className="size-4.5" strokeWidth={1.8} />}
-          title="ผู้ดูแลที่ให้สิทธิ์ในระบบนี้"
+          title="ผู้ที่ให้สิทธิ์ในระบบนี้"
           action={<Badge tone="primary">{grants.length} คน</Badge>}
         />
         {grants.length === 0 ? (
@@ -102,19 +117,31 @@ export function PermissionsManager({
             <EmptyState
               icon={<ShieldPlus className="size-8" strokeWidth={1.5} />}
               title="ยังไม่ได้ให้สิทธิ์ผู้ดูแลแก่ครูคนใด"
-              hint="กด “เพิ่มผู้ดูแล” เพื่อเลือกครู — ครูคนนั้นจะเห็นเมนูผู้ดูแลทั้งหมดในระบบวิชาเสริม"
+              hint="กด “เพิ่มสิทธิ์” เพื่อเลือกครู แล้วเลือกว่าจะให้เป็นผู้ดูแล หรือ Moderator"
             />
           </div>
         ) : (
           <ul className="divide-y divide-border/60">
             {grants.map((g) => (
               <li key={g.personId} className="flex items-center gap-4 px-4 py-3.5 sm:px-5">
-                <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <ShieldCheck className="size-5" strokeWidth={1.8} />
+                <span
+                  className={cn(
+                    'grid size-11 shrink-0 place-items-center rounded-xl',
+                    g.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-navy/10 text-navy',
+                  )}
+                >
+                  {g.role === 'admin' ? (
+                    <ShieldCheck className="size-5" strokeWidth={1.8} />
+                  ) : (
+                    <BookOpenCheck className="size-5" strokeWidth={1.8} />
+                  )}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-medium">{g.fullName}</p>
+                    <Badge tone={g.role === 'admin' ? 'primary' : 'navy'}>
+                      {LEVELS[g.role].label}
+                    </Badge>
                     <span className="text-xs text-muted-foreground tabular-nums">{g.code}</span>
                     {g.personId === selfPersonId ? <Badge tone="navy">คุณ</Badge> : null}
                     {g.status !== 'active' && g.status !== 'studying' ? (
@@ -180,6 +207,8 @@ export function PermissionsManager({
 function GrantForm({ teachers, onClose }: { teachers: TeacherItem[]; onClose: () => void }) {
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<number | null>(null);
+  // The narrower grant first: most people asked for are helping with วิชา.
+  const [role, setRole] = useState<'admin' | 'moderator'>('moderator');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -197,7 +226,7 @@ function GrantForm({ teachers, onClose }: { teachers: TeacherItem[]; onClose: ()
   async function submit() {
     if (saving || picked === null) return;
     setSaving(true);
-    const r = await grantAdminAction(picked, note);
+    const r = await grantAdminAction(picked, note, role);
     setSaving(false);
     if (r.ok) {
       toast.success(r.message);
@@ -218,19 +247,51 @@ function GrantForm({ teachers, onClose }: { teachers: TeacherItem[]; onClose: ()
           </Button>
           <Button onClick={submit} disabled={saving || picked === null}>
             <ShieldPlus className="size-4.5" strokeWidth={1.8} />
-            ให้สิทธิ์ผู้ดูแล
+            ให้สิทธิ์{LEVELS[role].label}
           </Button>
         </>
       }
     >
       <h2 id="grant-form-title" className="text-base font-semibold">
-        เพิ่มผู้ดูแลของระบบวิชาเสริม
+        เพิ่มสิทธิ์ในระบบวิชาเสริม
       </h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        เลือกครู 1 คน — สิทธิ์มีผลเฉพาะระบบนี้ และถอนคืนได้ทุกเมื่อ
+        เลือกครู 1 คน และระดับสิทธิ์ — มีผลเฉพาะระบบนี้ และถอนคืนได้ทุกเมื่อ
       </p>
 
       <div className="mt-4 space-y-3.5">
+        <div>
+          <Label id="grant-role-label">ระดับสิทธิ์</Label>
+          <div role="radiogroup" aria-labelledby="grant-role-label" className="grid gap-2 sm:grid-cols-2">
+            {(['moderator', 'admin'] as const).map((k) => {
+              const on = role === k;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => setRole(k)}
+                  className={cn(
+                    'rounded-xl border px-3 py-2.5 text-left transition-colors',
+                    on ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:bg-secondary/50',
+                  )}
+                >
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    {k === 'admin' ? (
+                      <ShieldCheck className="size-4" strokeWidth={1.8} />
+                    ) : (
+                      <BookOpenCheck className="size-4" strokeWidth={1.8} />
+                    )}
+                    {LEVELS[k].label}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{LEVELS[k].blurb}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div>
           <Label htmlFor="grant-q">ค้นหาครู</Label>
           <div className="relative">
@@ -305,8 +366,9 @@ function GrantForm({ teachers, onClose }: { teachers: TeacherItem[]; onClose: ()
 
         <p className="flex items-start gap-2 rounded-xl border border-border bg-secondary/30 p-3 text-xs text-muted-foreground">
           <UserPlus className="mt-0.5 size-4 shrink-0" strokeWidth={1.8} />
-          ครูที่ได้สิทธิ์จะเห็นเมนูผู้ดูแลทั้งหมด — จัดการวิชา จัดนักเรียนเข้าเรียน ทรานสคริปต์
-          สำรองข้อมูล และหน้าสิทธิ์นี้
+          {role === 'admin'
+            ? 'ครูที่ได้สิทธิ์ผู้ดูแลจะเห็นเมนูผู้ดูแลทั้งหมด รวมถึงหน้าสิทธิ์นี้'
+            : 'Moderator จะเห็นเมนู “ช่วยจัดวิชาเสริม” เพิ่มในเมนูครู — เข้าได้เฉพาะหน้าวิชาเสริม และตารางเรียนทั้งปี'}
         </p>
       </div>
     </Modal>

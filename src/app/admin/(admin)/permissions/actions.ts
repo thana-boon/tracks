@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { adminGrants, people } from '@/db/schema';
 import { actorOf, requireRole } from '@/lib/authz';
-import { isSchoolOsAdmin } from '@/lib/admin-grants';
+import { isGrantRole, isSchoolOsAdmin, type GrantRole } from '@/lib/admin-grants';
 import { logActivity } from '@/lib/log';
 import type { ActionResult } from '@/components/action-button';
 
@@ -23,10 +23,20 @@ function refresh() {
   revalidatePath('/admin');
 }
 
-export async function grantAdminAction(personId: number, note: string): Promise<ActionResult> {
+const ROLE_WORD: Record<GrantRole, string> = {
+  admin: 'สิทธิ์ผู้ดูแล',
+  moderator: 'สิทธิ์ Moderator',
+};
+
+export async function grantAdminAction(
+  personId: number,
+  note: string,
+  role: GrantRole = 'admin',
+): Promise<ActionResult> {
   const user = await requireRole('admin');
   if (!Number.isInteger(personId) || personId <= 0)
     return { ok: false, message: 'เลือกครูก่อน' };
+  if (!isGrantRole(role)) return { ok: false, message: 'ระดับสิทธิ์ไม่ถูกต้อง' };
 
   const [person] = await db
     .select({
@@ -50,21 +60,25 @@ export async function grantAdminAction(personId: number, note: string): Promise<
   try {
     await db.insert(adminGrants).values({
       personId,
+      role,
       note: trimmed || null,
       grantedBy: actorOf(user),
       grantedByName: user.name,
     });
   } catch {
     // The unique index is the guard against a double submit.
-    return { ok: false, message: `${person.fullName} มีสิทธิ์ผู้ดูแลอยู่แล้ว` };
+    return {
+      ok: false,
+      message: `${person.fullName} มีสิทธิ์อยู่แล้ว — ถ้าจะเปลี่ยนระดับ ให้ถอนสิทธิ์เดิมก่อน`,
+    };
   }
 
-  await logActivity(user, 'grant_admin', `person:${personId}`, {
+  await logActivity(user, role === 'admin' ? 'grant_admin' : 'grant_moderator', `person:${personId}`, {
     name: person.fullName,
     note: trimmed || null,
   });
   refresh();
-  return { ok: true, message: `ให้สิทธิ์ผู้ดูแลแก่ ${person.fullName} แล้ว` };
+  return { ok: true, message: `ให้${ROLE_WORD[role]}แก่ ${person.fullName} แล้ว` };
 }
 
 export async function revokeAdminAction(personId: number): Promise<ActionResult> {
@@ -75,7 +89,7 @@ export async function revokeAdminAction(personId: number): Promise<ActionResult>
     return { ok: false, message: 'ถอนสิทธิ์ของตัวเองไม่ได้ — ให้ผู้ดูแลคนอื่นถอนให้' };
 
   const [row] = await db
-    .select({ fullName: people.fullName })
+    .select({ fullName: people.fullName, role: adminGrants.role })
     .from(adminGrants)
     .innerJoin(people, eq(adminGrants.personId, people.id))
     .where(eq(adminGrants.personId, personId))
@@ -83,7 +97,10 @@ export async function revokeAdminAction(personId: number): Promise<ActionResult>
   if (!row) return { ok: false, message: 'ไม่พบสิทธิ์ที่จะถอน' };
 
   await db.delete(adminGrants).where(eq(adminGrants.personId, personId));
-  await logActivity(user, 'revoke_admin', `person:${personId}`, { name: row.fullName });
+  const role: GrantRole = row.role === 'admin' ? 'admin' : 'moderator';
+  await logActivity(user, role === 'admin' ? 'revoke_admin' : 'revoke_moderator', `person:${personId}`, {
+    name: row.fullName,
+  });
   refresh();
-  return { ok: true, message: `ถอนสิทธิ์ผู้ดูแลของ ${row.fullName} แล้ว` };
+  return { ok: true, message: `ถอน${ROLE_WORD[role]}ของ ${row.fullName} แล้ว` };
 }

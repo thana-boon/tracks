@@ -33,6 +33,8 @@ export interface ScheduleRow {
   groupId: number;
   groupCode: string;
   groupName: string;
+  /** สีของกลุ่ม — a GROUP_COLORS key, or null */
+  groupColor: string | null;
 }
 
 /**
@@ -59,6 +61,7 @@ export async function yearSchedule(yearId: number): Promise<ScheduleRow[]> {
       groupId: trackGroups.id,
       groupCode: trackGroups.code,
       groupName: trackGroups.name,
+      groupColor: trackGroups.color,
     })
     .from(subjectDates)
     .innerJoin(subjectSections, eq(subjectDates.sectionId, subjectSections.id))

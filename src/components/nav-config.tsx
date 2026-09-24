@@ -61,9 +61,11 @@ const sw = 1.7;
  * top, since that is where every session starts.
  *
  * Teachers and students have few enough screens that grouping would only add a
- * press, so their menus stay flat.
+ * press, so their menus stay flat. A ครู holding a moderator grant gets the two
+ * catalogue screens added to that flat menu, under a heading of their own so it
+ * is plain which links come with the grant.
  */
-export function navFor(role: AppRole): NavEntry[] {
+export function navFor(role: AppRole, opts: { moderator?: boolean } = {}): NavEntry[] {
   if (role === 'admin') {
     return [
       { href: '/admin', label: 'ภาพรวม', icon: <LayoutDashboard className="size-5" strokeWidth={sw} /> },
@@ -134,6 +136,18 @@ export function navFor(role: AppRole): NavEntry[] {
       { href: '/attendance', label: 'เช็คชื่อ', icon: <ClipboardCheck className="size-5" strokeWidth={sw} /> },
       { href: '/results', label: 'เวลาเข้าเรียน', icon: <CalendarCheck className="size-5" strokeWidth={sw} /> },
       { href: '/homeroom', label: 'ห้องที่ปรึกษา', icon: <Users className="size-5" strokeWidth={sw} /> },
+      ...(opts.moderator
+        ? [
+            {
+              label: 'ช่วยจัดวิชาเสริม',
+              icon: <Settings2 className="size-5" strokeWidth={sw} />,
+              items: [
+                { href: '/admin/subjects', label: 'วิชาเสริม', icon: <BookOpen className="size-5" strokeWidth={sw} /> },
+                { href: '/admin/schedule', label: 'ตารางเรียนทั้งปี', icon: <CalendarRange className="size-5" strokeWidth={sw} /> },
+              ],
+            },
+          ]
+        : []),
     ];
   }
   // student

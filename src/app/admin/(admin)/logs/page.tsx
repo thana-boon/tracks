@@ -41,6 +41,10 @@ const ACTION_LABEL: Record<string, string> = {
   delete_backup: 'ลบไฟล์สำรอง',
   restore_backup: 'กู้คืนข้อมูล',
   restore_upload: 'กู้คืนจากไฟล์อัปโหลด',
+  grant_admin: 'ให้สิทธิ์ผู้ดูแล',
+  revoke_admin: 'ถอนสิทธิ์ผู้ดูแล',
+  grant_moderator: 'ให้สิทธิ์ Moderator',
+  revoke_moderator: 'ถอนสิทธิ์ Moderator',
 };
 
 const DESTRUCTIVE = new Set(['delete_group', 'delete_subject', 'delete_classroom', 'delete_section', 'remove_class_date', 'delete_backup', 'restore_backup', 'restore_upload']);

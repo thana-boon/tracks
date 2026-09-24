@@ -71,6 +71,13 @@
       "when": 1790217298232,
       "tag": "0009_track_change_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790233139714,
+      "tag": "0010_group_color_moderator",
+      "breakpoints": true
     }
   ]
 }

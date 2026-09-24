@@ -21,6 +21,7 @@ export async function RoleShell({
   return (
     <AppShell
       role={user.role}
+      moderator={user.moderator}
       name={user.name}
       firstName={user.firstName}
       photoUrl={photoUrlOf(user)}

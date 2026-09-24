@@ -12,6 +12,7 @@ export default async function GroupsPage() {
       code: trackGroups.code,
       name: trackGroups.name,
       description: trackGroups.description,
+      color: trackGroups.color,
       active: trackGroups.active,
       subjectCount: sql<number>`count(${trackSubjects.id})`,
     })

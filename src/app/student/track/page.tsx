@@ -136,6 +136,7 @@ export default async function StudentTrackPage({
                 trackId: choice.trackId,
                 optionId: choice.optionId,
                 trackName: choice.trackName,
+                groupColor: choice.groupColor,
                 optionName: choice.optionName,
                 chosenAt: choice.chosenAt.toISOString(),
                 changedByAdmin: choiceByAdmin(choice.chosenBy, choice.changedBy),

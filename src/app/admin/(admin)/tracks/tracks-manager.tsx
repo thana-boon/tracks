@@ -31,6 +31,7 @@ import {
   type TrackRow,
 } from '@/lib/track-core';
 import { PHASES } from '@/lib/subject-phase';
+import { groupTint } from '@/lib/group-color';
 import { cn, fromSchoolDateTimeInput, thaiDateTimeLongOf, toSchoolDateTimeInput } from '@/lib/utils';
 import {
   deleteTrack,
@@ -243,92 +244,105 @@ export function TracksManager({
             title={`ปีการศึกษา ${term.year} ภาคเรียนที่ ${term.semester} — ${tracks.length} Track`}
           />
           <ul className="divide-y divide-border/60">
-            {tracks.map((t) => (
-              <li key={t.id} className="flex items-start gap-4 px-4 py-3.5 sm:px-5">
-                <span className="mt-0.5 grid size-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <Route className="size-5" strokeWidth={1.8} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium">{t.name}</p>
-                    {!t.active ? <Badge tone="secondary">ปิดไม่ให้เลือก</Badge> : null}
-                    {t.groupCode ? (
-                      <Badge tone="secondary">
-                        กลุ่ม {t.groupCode} · {trackPhaseLabel(t.phase)}
-                      </Badge>
-                    ) : (
-                      <Badge tone="secondary">ยังไม่ผูกกลุ่มวิชา</Badge>
+            {tracks.map((t) => {
+              const tint = groupTint(t.groupColor);
+              return (
+                <li
+                  key={t.id}
+                  className="flex items-start gap-4 px-4 py-3.5 sm:px-5"
+                  style={tint ? { backgroundColor: tint.surface.backgroundColor } : undefined}
+                >
+                  <span
+                    className={cn(
+                      'mt-0.5 grid size-11 shrink-0 place-items-center rounded-xl',
+                      !tint && 'bg-primary/10 text-primary',
                     )}
-                    <Badge tone="navy">
-                      {t.gradeLevels.length ? t.gradeLevels.join(' · ') : 'ทุกระดับชั้น'}
-                    </Badge>
-                    <Badge tone="primary">เลือกแล้ว {t.chosenCount} คน</Badge>
-                    <Badge tone="secondary">{changeLimitLabel(t.changeLimit)}</Badge>
-                    {(() => {
-                      const w = windowBadge(t);
-                      return w ? <Badge tone={w.tone}>{w.text}</Badge> : null;
-                    })()}
-                  </div>
-                  {t.description ? (
-                    <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
-                  ) : null}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t.groupId
-                      ? t.subjects.length
-                        ? `วิชาที่จะได้เรียน ${t.subjects.length} วิชา — ${t.subjects
-                            .map((x) => x.name)
-                            .join(', ')}`
-                        : `กลุ่ม ${t.groupName} ยังไม่มีวิชาในภาคเรียนที่ ${t.semester} ${trackPhaseLabel(t.phase)}`
-                      : 'แก้ไขเพื่อผูกกลุ่มวิชา แล้วนักเรียนจึงจะเห็นรายละเอียดวิชา'}
-                  </p>
-                  {t.options.length ? (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {t.options.map((o) => (
-                        <span
-                          key={o.id}
-                          className="rounded-full bg-secondary px-2.5 py-0.5 text-xs text-secondary-foreground"
-                        >
-                          {o.name}
-                          {o.groupName ? ` · ${o.subjects.length} วิชา` : ''}
-                        </span>
-                      ))}
+                    style={tint?.chip}
+                  >
+                    <Route className="size-5" strokeWidth={1.8} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium">{t.name}</p>
+                      {!t.active ? <Badge tone="secondary">ปิดไม่ให้เลือก</Badge> : null}
+                      {t.groupCode ? (
+                        <Badge tone="secondary" style={tint?.chip}>
+                          กลุ่ม {t.groupCode} · {trackPhaseLabel(t.phase)}
+                        </Badge>
+                      ) : (
+                        <Badge tone="secondary">ยังไม่ผูกกลุ่มวิชา</Badge>
+                      )}
+                      <Badge tone="navy">
+                        {t.gradeLevels.length ? t.gradeLevels.join(' · ') : 'ทุกระดับชั้น'}
+                      </Badge>
+                      <Badge tone="primary">เลือกแล้ว {t.chosenCount} คน</Badge>
+                      <Badge tone="secondary">{changeLimitLabel(t.changeLimit)}</Badge>
+                      {(() => {
+                        const w = windowBadge(t);
+                        return w ? <Badge tone={w.tone}>{w.text}</Badge> : null;
+                      })()}
                     </div>
-                  ) : (
-                    <p className="mt-1 text-xs text-muted-foreground">ไม่มีข้อย่อย</p>
-                  )}
-                  <div className="mt-2.5 flex flex-wrap gap-2">
-                    <SwitchButton on={t.active} label="การเลือก" onClick={() => toggle(t)} />
-                    <SwitchButton
-                      on={t.changesOpen}
-                      label="การแก้ไข"
-                      disabled={t.changeLimit === 0}
-                      title={
-                        t.changeLimit === 0
-                          ? 'Track นี้กำหนดให้แก้ไขไม่ได้ — ตั้งจำนวนครั้งในหน้าแก้ไข'
-                          : undefined
-                      }
-                      onClick={() => toggleChanges(t)}
-                    />
+                    {t.description ? (
+                      <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
+                    ) : null}
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t.groupId
+                        ? t.subjects.length
+                          ? `วิชาที่จะได้เรียน ${t.subjects.length} วิชา — ${t.subjects
+                              .map((x) => x.name)
+                              .join(', ')}`
+                          : `กลุ่ม ${t.groupName} ยังไม่มีวิชาในภาคเรียนที่ ${t.semester} ${trackPhaseLabel(t.phase)}`
+                        : 'แก้ไขเพื่อผูกกลุ่มวิชา แล้วนักเรียนจึงจะเห็นรายละเอียดวิชา'}
+                    </p>
+                    {t.options.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {t.options.map((o) => (
+                          <span
+                            key={o.id}
+                            className="rounded-full bg-secondary px-2.5 py-0.5 text-xs text-secondary-foreground"
+                          >
+                            {o.name}
+                            {o.groupName ? ` · ${o.subjects.length} วิชา` : ''}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-xs text-muted-foreground">ไม่มีข้อย่อย</p>
+                    )}
+                    <div className="mt-2.5 flex flex-wrap gap-2">
+                      <SwitchButton on={t.active} label="การเลือก" onClick={() => toggle(t)} />
+                      <SwitchButton
+                        on={t.changesOpen}
+                        label="การแก้ไข"
+                        disabled={t.changeLimit === 0}
+                        title={
+                          t.changeLimit === 0
+                            ? 'Track นี้กำหนดให้แก้ไขไม่ได้ — ตั้งจำนวนครั้งในหน้าแก้ไข'
+                            : undefined
+                        }
+                        onClick={() => toggleChanges(t)}
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    onClick={() => setEditing(t)}
-                    title="แก้ไข"
-                    className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-                  >
-                    <Pencil className="size-4.5" strokeWidth={1.8} />
-                  </button>
-                  <button
-                    onClick={() => remove(t)}
-                    title="ลบ"
-                    className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  >
-                    <Trash2 className="size-4.5" strokeWidth={1.8} />
-                  </button>
-                </div>
-              </li>
-            ))}
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      onClick={() => setEditing(t)}
+                      title="แก้ไข"
+                      className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+                    >
+                      <Pencil className="size-4.5" strokeWidth={1.8} />
+                    </button>
+                    <button
+                      onClick={() => remove(t)}
+                      title="ลบ"
+                      className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="size-4.5" strokeWidth={1.8} />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </Card>
       )}

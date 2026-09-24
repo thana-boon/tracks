@@ -52,6 +52,12 @@ export interface SessionUser {
   adminId?: number;
   /** people.id, when the session came from a SchoolOS teacher/student */
   personId?: number;
+  /**
+   * A ครู holding a moderator grant (หน้าสิทธิ์) — may edit วิชาเสริม and
+   * ตารางเรียนทั้งปี. Never signed into the token: authz re-reads it from the
+   * database on every page load, like the role, and identityOf() leaves it out.
+   */
+  moderator?: boolean;
   /** how they got in — decides whether the SchoolOS session is ours to renew */
   via?: SessionVia;
   /**

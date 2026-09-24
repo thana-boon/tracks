@@ -97,6 +97,7 @@ export async function tracksForTerm(
       groupId: tracks.groupId,
       groupCode: trackGroups.code,
       groupName: trackGroups.name,
+      groupColor: trackGroups.color,
       phase: tracks.phase,
       name: tracks.name,
       description: tracks.description,
@@ -198,6 +199,7 @@ export async function tracksForTerm(
     groupId: t.groupId,
     groupCode: t.groupCode,
     groupName: t.groupName,
+    groupColor: t.groupColor,
     phase: t.phase,
     name: t.name,
     description: t.description,
@@ -229,6 +231,7 @@ export async function groupCatalog(): Promise<GroupCatalogRow[]> {
         code: trackGroups.code,
         name: trackGroups.name,
         description: trackGroups.description,
+        color: trackGroups.color,
       })
       .from(trackGroups)
       .where(eq(trackGroups.active, true))
@@ -261,6 +264,8 @@ export interface ChoiceRow {
   id: number;
   trackId: number;
   trackName: string;
+  /** สีของกลุ่มวิชาของสายที่เลือก */
+  groupColor: string | null;
   optionId: number | null;
   optionName: string | null;
   chosenBy: string;
@@ -282,6 +287,7 @@ export async function choiceOf(
       id: trackChoices.id,
       trackId: trackChoices.trackId,
       trackName: tracks.name,
+      groupColor: trackGroups.color,
       optionId: trackChoices.optionId,
       optionName: trackOptions.name,
       chosenBy: trackChoices.chosenBy,
@@ -292,6 +298,7 @@ export async function choiceOf(
     })
     .from(trackChoices)
     .innerJoin(tracks, eq(trackChoices.trackId, tracks.id))
+    .leftJoin(trackGroups, eq(tracks.groupId, trackGroups.id))
     .leftJoin(trackOptions, eq(trackChoices.optionId, trackOptions.id))
     .where(
       and(
@@ -313,6 +320,7 @@ export async function choiceHistoryOf(studentId: number): Promise<
       id: trackChoices.id,
       trackId: trackChoices.trackId,
       trackName: tracks.name,
+      groupColor: trackGroups.color,
       optionId: trackChoices.optionId,
       optionName: trackOptions.name,
       chosenBy: trackChoices.chosenBy,
@@ -326,6 +334,7 @@ export async function choiceHistoryOf(studentId: number): Promise<
     .from(trackChoices)
     .innerJoin(tracks, eq(trackChoices.trackId, tracks.id))
     .innerJoin(academicYears, eq(trackChoices.yearId, academicYears.id))
+    .leftJoin(trackGroups, eq(tracks.groupId, trackGroups.id))
     .leftJoin(trackOptions, eq(trackChoices.optionId, trackOptions.id))
     .where(eq(trackChoices.studentId, studentId))
     .orderBy(desc(academicYears.year), desc(trackChoices.semester));

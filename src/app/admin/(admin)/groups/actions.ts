@@ -7,23 +7,42 @@ import { db } from '@/db';
 import { trackGroups, trackSubjects } from '@/db/schema';
 import { requireRole } from '@/lib/authz';
 import { logActivity } from '@/lib/log';
+import { isGroupColor } from '@/lib/group-color';
 import type { ActionResult } from '@/components/action-button';
+
+/**
+ * A กลุ่ม's name and colour are painted on every screen that lists its วิชา or
+ * its สาย, so an edit here re-renders those as well as this one.
+ */
+function refresh() {
+  revalidatePath('/admin/groups');
+  revalidatePath('/admin/subjects');
+  revalidatePath('/admin/schedule');
+  revalidatePath('/admin/tracks');
+  revalidatePath('/student/track');
+}
 
 const GroupInput = z.object({
   code: z.string().trim().min(1, 'กรอกรหัสกลุ่ม').max(20),
   name: z.string().trim().min(1, 'กรอกชื่อกลุ่ม').max(120),
   description: z.string().trim().max(500).optional().default(''),
+  /** a GROUP_COLORS key, or null for no colour */
+  color: z
+    .string()
+    .nullable()
+    .default(null)
+    .refine((c) => c === null || isGroupColor(c), 'สีไม่ถูกต้อง'),
 });
 
 export async function saveGroup(
   id: number | null,
-  form: { code: string; name: string; description: string },
+  form: { code: string; name: string; description: string; color: string | null },
 ): Promise<ActionResult> {
   const user = await requireRole('admin');
   const parsed = GroupInput.safeParse(form);
   if (!parsed.success)
     return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
-  const { code, name, description } = parsed.data;
+  const { code, name, description, color } = parsed.data;
 
   // Unique code guard (excluding self on edit).
   const clash = await db
@@ -36,16 +55,16 @@ export async function saveGroup(
   if (id) {
     await db
       .update(trackGroups)
-      .set({ code, name, description: description || null })
+      .set({ code, name, description: description || null, color })
       .where(eq(trackGroups.id, id));
     await logActivity(user, 'update_group', code);
-    revalidatePath('/admin/groups');
+    refresh();
     return { ok: true, message: `แก้ไขกลุ่ม “${name}” แล้ว` };
   }
 
-  await db.insert(trackGroups).values({ code, name, description: description || null });
+  await db.insert(trackGroups).values({ code, name, description: description || null, color });
   await logActivity(user, 'create_group', code);
-  revalidatePath('/admin/groups');
+  refresh();
   return { ok: true, message: `เพิ่มกลุ่ม “${name}” แล้ว` };
 }
 

@@ -112,6 +112,11 @@ export const adminGrants = pgTable(
     personId: integer('person_id')
       .notNull()
       .references(() => people.id, { onDelete: 'cascade' }),
+    /**
+     * 'admin' — every ผู้ดูแล screen. 'moderator' — stays a ครู, and may also
+     * edit วิชาเสริม and ตารางเรียนทั้งปี (see lib/admin-grants.ts).
+     */
+    role: text('role').notNull().default('admin'),
     /** why this teacher was given admin — free text, shown on the สิทธิ์ page */
     note: text('note'),
     grantedBy: text('granted_by').notNull(),
@@ -143,6 +148,11 @@ export const trackGroups = pgTable('track_groups', {
   code: text('code').notNull().unique(),
   name: text('name').notNull(),
   description: text('description'),
+  /**
+   * สีของกลุ่ม — a key of GROUP_COLORS (lib/group-color.ts), never a raw hex,
+   * so every screen tints it the same way in light and dark. Null = no colour.
+   */
+  color: text('color'),
   active: boolean('active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });

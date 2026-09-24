@@ -14,19 +14,40 @@ import { adminGrants, people } from '@/db/schema';
  * the two sources of admin from fighting each other.
  */
 
+/**
+ * What a grant gives. 'admin' is every ผู้ดูแล screen. 'moderator' leaves the
+ * teacher a ครู — their own menus, their own dashboard — and adds exactly the
+ * two catalogue screens: วิชาเสริม and ตารางเรียนทั้งปี. Nothing else under
+ * /admin opens to them, so a moderator cannot place students, touch Track or
+ * hand out สิทธิ์.
+ */
+export const GRANT_ROLES = ['admin', 'moderator'] as const;
+export type GrantRole = (typeof GRANT_ROLES)[number];
+
+export function isGrantRole(v: unknown): v is GrantRole {
+  return (GRANT_ROLES as readonly unknown[]).includes(v);
+}
+
 /** Teachers whose SchoolOS role already makes them admin — grants are moot. */
 export function isSchoolOsAdmin(schoolosRole: string | null | undefined): boolean {
   return schoolosRole === 'teacher-admin';
 }
 
-/** Does this person hold a local admin grant? */
-export async function hasAdminGrant(personId: number): Promise<boolean> {
+/** The grant this person holds here, if any. */
+export async function grantRoleOf(personId: number): Promise<GrantRole | null> {
   const [row] = await db
-    .select({ id: adminGrants.id })
+    .select({ role: adminGrants.role })
     .from(adminGrants)
     .where(eq(adminGrants.personId, personId))
     .limit(1);
-  return Boolean(row);
+  // An unknown value reads as the narrower grant, never the wider one.
+  if (!row) return null;
+  return row.role === 'admin' ? 'admin' : 'moderator';
+}
+
+/** Does this person hold a local *admin* grant? A moderator grant is not one. */
+export async function hasAdminGrant(personId: number): Promise<boolean> {
+  return (await grantRoleOf(personId)) === 'admin';
 }
 
 /**
@@ -54,6 +75,7 @@ export interface AdminGrantRow {
   fullName: string;
   schoolosRole: string | null;
   status: string;
+  role: GrantRole;
   note: string | null;
   grantedByName: string;
   createdAt: Date;
@@ -61,13 +83,14 @@ export interface AdminGrantRow {
 
 /** Everyone holding a grant, newest first — the list the สิทธิ์ page manages. */
 export async function listAdminGrants(): Promise<AdminGrantRow[]> {
-  return db
+  const rows = await db
     .select({
       personId: adminGrants.personId,
       code: people.code,
       fullName: people.fullName,
       schoolosRole: people.schoolosRole,
       status: people.status,
+      role: adminGrants.role,
       note: adminGrants.note,
       grantedByName: adminGrants.grantedByName,
       createdAt: adminGrants.createdAt,
@@ -75,6 +98,7 @@ export async function listAdminGrants(): Promise<AdminGrantRow[]> {
     .from(adminGrants)
     .innerJoin(people, eq(adminGrants.personId, people.id))
     .orderBy(desc(adminGrants.createdAt));
+  return rows.map((r) => ({ ...r, role: r.role === 'admin' ? 'admin' : 'moderator' }));
 }
 
 export interface TeacherRow {

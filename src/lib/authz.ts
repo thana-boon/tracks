@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { people } from '@/db/schema';
 import { getSession, type AppRole, type SessionUser } from './session';
-import { hasAdminGrant, isSchoolOsAdmin } from './admin-grants';
+import { grantRoleOf, isSchoolOsAdmin } from './admin-grants';
 
 /**
  * Statuses that end someone's access the moment the roster sync records them.
@@ -56,11 +56,12 @@ async function withEffectiveRole(user: SessionUser): Promise<SessionUser | null>
     if (!row || GONE.has(row.status)) return null;
     if (row.type !== 'teacher' || user.role === 'student') return user;
 
-    const role: AppRole =
-      isSchoolOsAdmin(row.schoolosRole) || (await hasAdminGrant(user.personId))
-        ? 'admin'
-        : 'teacher';
-    return role === user.role ? user : { ...user, role };
+    const grant = isSchoolOsAdmin(row.schoolosRole) ? 'admin' : await grantRoleOf(user.personId);
+    const role: AppRole = grant === 'admin' ? 'admin' : 'teacher';
+    const moderator = grant === 'moderator';
+    return role === user.role && moderator === Boolean(user.moderator)
+      ? user
+      : { ...user, role, moderator };
   } catch {
     // A momentarily unreachable DB must not log everyone out; the JWT's own
     // role is the safe fallback — it can only be as broad as it was at login.
@@ -90,6 +91,24 @@ export async function currentUser(): Promise<SessionUser | null> {
 export async function requireRole(...roles: AppRole[]): Promise<SessionUser> {
   const user = await requireUser();
   if (!roles.includes(user.role)) redirect(dashboardPath(user.role));
+  return user;
+}
+
+/**
+ * Whether this user may edit the catalogue screens — วิชาเสริม and
+ * ตารางเรียนทั้งปี. Every ผู้ดูแล may; of the ครู, only a moderator.
+ */
+export function canEditCatalog(user: SessionUser): boolean {
+  return user.role === 'admin' || (user.role === 'teacher' && Boolean(user.moderator));
+}
+
+/**
+ * Require a user who may edit the catalogue — the guard for the two screens a
+ * moderator shares with the ผู้ดูแล, and for every server action behind them.
+ */
+export async function requireCatalogEditor(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (!canEditCatalog(user)) redirect(dashboardPath(user.role));
   return user;
 }
 

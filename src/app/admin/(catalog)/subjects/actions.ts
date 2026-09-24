@@ -5,7 +5,7 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db';
 import { registrations, trackSubjects } from '@/db/schema';
-import { requireRole } from '@/lib/authz';
+import { requireCatalogEditor } from '@/lib/authz';
 import { logActivity } from '@/lib/log';
 import type { ActionResult } from '@/components/action-button';
 
@@ -32,7 +32,7 @@ export async function saveSubject(
     phase: number | null;
   },
 ): Promise<ActionResult> {
-  const user = await requireRole('admin');
+  const user = await requireCatalogEditor();
   const parsed = SubjectInput.safeParse(form);
   if (!parsed.success)
     return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
@@ -81,7 +81,7 @@ export async function setSubjectPhase(
   semester: number | null,
   phase: number | null,
 ): Promise<ActionResult> {
-  const user = await requireRole('admin');
+  const user = await requireCatalogEditor();
   const parsed = z
     .object({
       semester: z.number().int().min(1).max(2).nullable(),
@@ -106,7 +106,7 @@ export async function setSubjectPhase(
 }
 
 export async function toggleSubject(id: number, active: boolean): Promise<ActionResult> {
-  const user = await requireRole('admin');
+  const user = await requireCatalogEditor();
   await db.update(trackSubjects).set({ active }).where(eq(trackSubjects.id, id));
   await logActivity(user, active ? 'enable_subject' : 'disable_subject', `subject:${id}`);
   revalidatePath('/admin/subjects');
@@ -114,7 +114,7 @@ export async function toggleSubject(id: number, active: boolean): Promise<Action
 }
 
 export async function deleteSubject(id: number): Promise<ActionResult> {
-  const user = await requireRole('admin');
+  const user = await requireCatalogEditor();
   const [{ n }] = await db
     .select({ n: sql<number>`count(*)` })
     .from(registrations)

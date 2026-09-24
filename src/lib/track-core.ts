@@ -67,6 +67,8 @@ export interface TrackRow {
   groupId: number | null;
   groupCode: string | null;
   groupName: string | null;
+  /** สีของกลุ่มวิชา — a GROUP_COLORS key; the สาย is painted in it */
+  groupColor: string | null;
   /** ช่วงในภาคเรียน — 1, 2, or null for ทั้งภาคเรียน */
   phase: number | null;
   name: string;
@@ -96,6 +98,7 @@ export interface GroupCatalogRow {
   code: string;
   name: string;
   description: string | null;
+  color: string | null;
   subjects: TrackSubjectRow[];
 }
 

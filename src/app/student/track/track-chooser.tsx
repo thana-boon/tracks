@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge, Button, Card, CardHeader, EmptyState, Select } from '@/components/ui';
+import { groupTint } from '@/lib/group-color';
 import { Modal, useDialog } from '@/components/dialog';
 import { SubjectList } from '@/components/track-subjects';
 import {
@@ -40,6 +41,7 @@ export interface MyChoice {
   trackId: number;
   optionId: number | null;
   trackName: string;
+  groupColor: string | null;
   optionName: string | null;
   chosenAt: string;
   changedByAdmin: boolean;
@@ -444,7 +446,7 @@ export function TrackChooser({
       </Card>
 
       {choice ? (
-        <Card className="p-5">
+        <Card className="p-5" style={groupTint(choice.groupColor)?.surface}>
           <div className="flex items-start gap-4">
             <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-success/10 text-success">
               <CheckCircle2 className="size-5.5" strokeWidth={1.8} />
@@ -535,6 +537,9 @@ export function TrackChooser({
                 const shut = w.state !== 'open';
                 const note = windowNote(w, at);
                 const on = t.id === trackId;
+                // The สาย wears its กลุ่มวิชา's colour, so the same colour means
+                // the same กลุ่ม here, on หน้ารายละเอียด and in the ผู้ดูแล's lists.
+                const tint = shut ? null : groupTint(t.groupColor);
                 return (
                   <li key={t.id}>
                     <button
@@ -545,15 +550,31 @@ export function TrackChooser({
                         if (t.id !== trackId) setOptionId(null);
                       }}
                       className={cn(
-                        'w-full rounded-xl border px-4 py-3.5 text-left transition-colors',
+                        'w-full rounded-xl border px-4 py-3.5 text-left transition',
                         shut
                           ? 'cursor-not-allowed border-border bg-secondary/30 opacity-70'
                           : on
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border hover:bg-secondary/50',
+                            ? 'border-primary bg-primary/5 ring-2 ring-primary'
+                            : tint
+                              ? 'hover:brightness-[0.97]'
+                              : 'border-border hover:bg-secondary/50',
                       )}
+                      // Chosen: the ring and border stay the page's primary, so which one is
+                      // picked never depends on telling two colours apart.
+                      style={tint ? (on ? { backgroundColor: tint.surface.backgroundColor } : tint.surface) : undefined}
                     >
                       <div className="flex flex-wrap items-center gap-2">
+                        {t.groupCode ? (
+                          <span
+                            className={cn(
+                              'rounded-md px-2 py-0.5 text-xs font-bold',
+                              !tint && 'bg-secondary text-secondary-foreground',
+                            )}
+                            style={tint?.chip}
+                          >
+                            {t.groupCode}
+                          </span>
+                        ) : null}
                         <span className="font-medium">{t.name}</span>
                         <Badge tone="navy">{trackPhaseLabel(t.phase)}</Badge>
                         {t.subjects.length ? (
@@ -714,7 +735,11 @@ function TrackDetail({ track, onClose }: { track: TrackRow; onClose: () => void 
         <Badge tone="navy">
           ภาคเรียนที่ {track.semester} · {trackPhaseLabel(track.phase)}
         </Badge>
-        {track.groupCode ? <Badge tone="secondary">กลุ่ม {track.groupCode}</Badge> : null}
+        {track.groupCode ? (
+          <Badge tone="secondary" style={groupTint(track.groupColor)?.chip}>
+            กลุ่ม {track.groupCode}
+          </Badge>
+        ) : null}
       </div>
       {track.description ? (
         <p className="mt-1.5 text-sm text-muted-foreground">{track.description}</p>

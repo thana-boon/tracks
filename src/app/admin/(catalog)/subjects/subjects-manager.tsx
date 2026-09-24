@@ -17,6 +17,7 @@ import {
 import { Modal, useDialog } from '@/components/dialog';
 import { cn } from '@/lib/utils';
 import { PHASE_SLOTS, phaseKey, phaseLabel } from '@/lib/subject-phase';
+import { groupTint } from '@/lib/group-color';
 import { saveSubject, toggleSubject, deleteSubject, setSubjectPhase } from './actions';
 
 export interface SubjectItem {
@@ -31,12 +32,14 @@ export interface SubjectItem {
   groupId: number;
   groupCode: string;
   groupName: string;
+  groupColor: string | null;
   studentCount: number;
 }
 export interface GroupOption {
   id: number;
   code: string;
   name: string;
+  color: string | null;
 }
 
 /** ช่วงที่แท็บหนึ่งถูกแบ่ง — สี่ช่วงของปี แล้วตามด้วยวิชาที่ยังไม่ได้จัดเข้าช่วง */
@@ -48,9 +51,12 @@ const BUCKETS: { key: string; semester: number | null; phase: number | null; lab
 export function SubjectsManager({
   subjects,
   groups,
+  canManageGroups,
 }: {
   subjects: SubjectItem[];
   groups: GroupOption[];
+  /** ผู้ดูแล only — a moderator cannot open กลุ่มวิชา, so is not sent there */
+  canManageGroups: boolean;
 }) {
   const [editing, setEditing] = useState<SubjectItem | null>(null);
   const [creating, setCreating] = useState(false);
@@ -90,14 +96,20 @@ export function SubjectsManager({
         <EmptyState
           icon={<BookOpen className="size-8" strokeWidth={1.5} />}
           title="ยังไม่มีกลุ่มวิชา"
-          hint="เพิ่มกลุ่มวิชาก่อนจึงจะเพิ่มวิชาได้"
+          hint={
+            canManageGroups
+              ? 'เพิ่มกลุ่มวิชาก่อนจึงจะเพิ่มวิชาได้'
+              : 'ต้องมีกลุ่มวิชาก่อนจึงจะเพิ่มวิชาได้ — ติดต่อผู้ดูแลระบบให้เพิ่มกลุ่มวิชา'
+          }
           action={
-            <a
-              href="/admin/groups"
-              className="mt-2 inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              ไปที่กลุ่มวิชา
-            </a>
+            canManageGroups ? (
+              <a
+                href="/admin/groups"
+                className="mt-2 inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                ไปที่กลุ่มวิชา
+              </a>
+            ) : undefined
           }
         />
       ) : (
@@ -110,6 +122,7 @@ export function SubjectsManager({
             {groups.map((g) => {
               const active = g.id === groupId;
               const n = subjects.filter((s) => s.groupId === g.id).length;
+              const tint = groupTint(g.color);
               return (
                 <button
                   key={g.id}
@@ -117,13 +130,25 @@ export function SubjectsManager({
                   aria-selected={active}
                   onClick={() => setTab(g.id)}
                   className={cn(
-                    'flex shrink-0 items-center gap-2 border-b-2 px-4 py-2.5 text-sm transition-colors',
+                    'flex shrink-0 items-center gap-2 rounded-t-lg border-b-2 px-4 py-2.5 text-sm transition-colors',
                     active
                       ? 'border-primary text-foreground'
                       : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
                   )}
+                  // The กลุ่ม's own colour marks its tab, and fills it once open.
+                  style={
+                    tint
+                      ? {
+                          borderBottomColor: active ? tint.solid.backgroundColor : undefined,
+                          backgroundColor: active ? tint.surface.backgroundColor : undefined,
+                        }
+                      : undefined
+                  }
                 >
-                  <span className="font-bold">{g.code}</span>
+                  {tint ? <span className="size-2.5 rounded-full" style={tint.solid} /> : null}
+                  <span className="font-bold" style={active ? tint?.ink : undefined}>
+                    {g.code}
+                  </span>
                   <span className="hidden font-medium sm:inline">{g.name}</span>
                   <span
                     className={cn(
@@ -203,9 +228,19 @@ function SubjectRow({ subject: s, onEdit }: { subject: SubjectItem; onEdit: () =
     start(() => {});
   }
 
+  const tint = groupTint(s.groupColor);
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5 sm:px-5">
-      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-secondary text-xs font-bold text-secondary-foreground">
+    <li
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5 sm:px-5"
+      style={tint ? { backgroundColor: tint.surface.backgroundColor } : undefined}
+    >
+      <span
+        className={cn(
+          'grid size-11 shrink-0 place-items-center rounded-xl text-xs font-bold',
+          !tint && 'bg-secondary text-secondary-foreground',
+        )}
+        style={tint?.chip}
+      >
         {s.code}
       </span>
       <div className="min-w-40 flex-1">

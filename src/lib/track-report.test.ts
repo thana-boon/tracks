@@ -13,6 +13,7 @@ function track(id: number, name: string, options: string[] = [], active = true):
     groupId: null,
     groupCode: null,
     groupName: null,
+    groupColor: null,
     phase: null,
     name,
     description: null,

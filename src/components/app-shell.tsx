@@ -24,6 +24,7 @@ import type { AppRole } from '@/lib/session';
 
 export function AppShell({
   role,
+  moderator,
   name,
   firstName,
   photoUrl,
@@ -35,6 +36,8 @@ export function AppShell({
   children,
 }: {
   role: AppRole;
+  /** a ครู with a moderator grant — adds the catalogue screens to their menu */
+  moderator?: boolean;
   name: string;
   /** ชื่อจริง — the avatar initial comes from this when there is no photo */
   firstName?: string;
@@ -51,7 +54,7 @@ export function AppShell({
   client?: 'web' | 'pwa';
   children: React.ReactNode;
 }) {
-  const nav = navFor(role);
+  const nav = navFor(role, { moderator });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 

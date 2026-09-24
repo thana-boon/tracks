@@ -28,6 +28,7 @@ export default async function PermissionsPage() {
         code: g.code,
         fullName: g.fullName,
         status: g.status,
+        role: g.role,
         note: g.note,
         grantedByName: g.grantedByName,
         createdAt: g.createdAt,

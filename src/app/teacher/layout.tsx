@@ -10,6 +10,7 @@ export default async function TeacherLayout({ children }: { children: React.Reac
   return (
     <AppShell
       role="teacher"
+      moderator={user.moderator}
       name={user.name}
       firstName={user.firstName}
       photoUrl={photoUrlOf(user)}
