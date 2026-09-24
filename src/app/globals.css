@@ -135,6 +135,27 @@ body {
   overflow-wrap: break-word;
 }
 
+/* Anything clickable shows the hand. Tailwind v4's preflight left buttons with
+   the arrow. In @layer base with :where(), so a cursor-* utility still wins. */
+@layer base {
+  :where(
+    button,
+    [role='button'],
+    [role='tab'],
+    [role='menuitem'],
+    [role='option'],
+    [role='switch'],
+    [role='checkbox'],
+    [role='radio'],
+    summary,
+    select,
+    input:is([type='checkbox'], [type='radio'], [type='file'], [type='color'], [type='submit'], [type='button'], [type='reset']),
+    label:has(input:is([type='checkbox'], [type='radio']):not(:disabled))
+  ):where(:not(:disabled, [aria-disabled='true'])) {
+    cursor: pointer;
+  }
+}
+
 /* focus ring — consistent across interactive elements */
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--ring);
