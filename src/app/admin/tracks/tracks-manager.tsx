@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Plus, Pencil, Trash2, Route, Power, Users, X, Layers } from 'lucide-react';
+import { Plus, Pencil, Trash2, Route, Users, X, Layers, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Badge,
@@ -20,7 +20,9 @@ import { Modal, useDialog } from '@/components/dialog';
 import { SubjectList } from '@/components/track-subjects';
 import {
   GRADE_LEVELS,
+  MAX_CHANGE_LIMIT,
   SEMESTERS,
+  changeLimitLabel,
   subjectInTrack,
   trackPhaseLabel,
   trackWindow,
@@ -30,7 +32,13 @@ import {
 } from '@/lib/track-core';
 import { PHASES } from '@/lib/subject-phase';
 import { cn, fromSchoolDateTimeInput, thaiDateTimeLongOf, toSchoolDateTimeInput } from '@/lib/utils';
-import { deleteTrack, saveTrack, toggleTrack } from './actions';
+import {
+  deleteTrack,
+  saveTrack,
+  setTermSwitch,
+  toggleTrack,
+  toggleTrackChanges,
+} from './actions';
 
 /** A Track as the list shows it — the row plus how many have picked it. */
 export interface ManagerTrack extends TrackRow {
@@ -77,6 +85,16 @@ function windowHint(opensAt: string, closesAt: string): string {
     : `นักเรียนเลือกได้จนถึง ${closes} น.`;
 }
 
+/** What the จำนวนครั้ง box currently means, for the นักเรียน it will reach. */
+function changeLimitHint(value: string): string {
+  const n = Number(value);
+  if (value.trim() === '' || !Number.isInteger(n) || n < 0 || n > MAX_CHANGE_LIMIT)
+    return `กรอกจำนวนเต็ม 0 ถึง ${MAX_CHANGE_LIMIT}`;
+  return n === 0
+    ? '0 = เลือกได้ครั้งเดียว เปลี่ยนเองไม่ได้ — นักเรียนจะเห็นข้อความ “เลือกแล้วแก้ไขไม่ได้”'
+    : `นักเรียนที่เลือก Track นี้เปลี่ยนเองได้ ${n} ครั้ง ภายในช่วงเวลาเปิดรับ — หน้าของนักเรียนจะบอกว่าเหลืออีกกี่ครั้ง`;
+}
+
 export interface YearOption {
   id: number;
   year: string;
@@ -119,13 +137,34 @@ export function TracksManager({
     r.ok ? toast.success(r.message) : toast.error(r.message);
   }
 
+  async function toggleChanges(t: ManagerTrack) {
+    const r = await toggleTrackChanges(t.id, !t.changesOpen);
+    r.ok ? toast.success(r.message) : toast.error(r.message);
+  }
+
+  async function switchTerm(what: 'choose' | 'change', on: boolean) {
+    const label = what === 'choose' ? 'การเลือก' : 'การแก้ไข';
+    const ok = await dialog.confirm({
+      title: `${on ? 'เปิด' : 'ปิด'}${label}ทุก Track?`,
+      description: `มีผลกับทั้ง ${tracks.length} Track ของปีการศึกษา ${term.year} ภาคเรียนที่ ${term.semester}`,
+      ...(on ? {} : { tone: 'destructive' as const }),
+    });
+    if (!ok) return;
+    const r = await setTermSwitch({ yearId: term.yearId, semester: term.semester, what, on });
+    r.ok ? toast.success(r.message) : toast.error(r.message);
+  }
+
+  const allChoosing = tracks.length > 0 && tracks.every((t) => t.active);
+  const allChanging = tracks.length > 0 && tracks.every((t) => t.changesOpen);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Track</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            สายการเรียนที่นักเรียนเลือกเองได้ภาคเรียนละหนึ่งครั้ง — บาง Track มีข้อย่อยให้เลือกต่อ
+            สายการเรียนที่นักเรียนเลือกเองได้ภาคเรียนละหนึ่งสาย และแก้ไขได้ตามจำนวนครั้งที่กำหนด —
+            บาง Track มีข้อย่อยให้เลือกต่อ
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -172,6 +211,25 @@ export function TracksManager({
         </p>
       </Card>
 
+      {tracks.length ? (
+        <Card className="flex flex-wrap items-center gap-x-4 gap-y-3 p-4 sm:p-5">
+          <span className="text-sm font-medium">ทั้งภาคเรียน</span>
+          <SwitchButton
+            on={allChoosing}
+            label="การเลือก"
+            onClick={() => switchTerm('choose', !allChoosing)}
+          />
+          <SwitchButton
+            on={allChanging}
+            label="การแก้ไข"
+            onClick={() => switchTerm('change', !allChanging)}
+          />
+          <p className="text-xs text-muted-foreground">
+            เปิด-ปิดทุก Track พร้อมกัน — หรือสลับทีละ Track ที่รายการด้านล่าง
+          </p>
+        </Card>
+      ) : null}
+
       {tracks.length === 0 ? (
         <EmptyState
           icon={<Route className="size-8" strokeWidth={1.5} />}
@@ -205,6 +263,7 @@ export function TracksManager({
                       {t.gradeLevels.length ? t.gradeLevels.join(' · ') : 'ทุกระดับชั้น'}
                     </Badge>
                     <Badge tone="primary">เลือกแล้ว {t.chosenCount} คน</Badge>
+                    <Badge tone="secondary">{changeLimitLabel(t.changeLimit)}</Badge>
                     {(() => {
                       const w = windowBadge(t);
                       return w ? <Badge tone={w.tone}>{w.text}</Badge> : null;
@@ -237,15 +296,22 @@ export function TracksManager({
                   ) : (
                     <p className="mt-1 text-xs text-muted-foreground">ไม่มีข้อย่อย</p>
                   )}
+                  <div className="mt-2.5 flex flex-wrap gap-2">
+                    <SwitchButton on={t.active} label="การเลือก" onClick={() => toggle(t)} />
+                    <SwitchButton
+                      on={t.changesOpen}
+                      label="การแก้ไข"
+                      disabled={t.changeLimit === 0}
+                      title={
+                        t.changeLimit === 0
+                          ? 'Track นี้กำหนดให้แก้ไขไม่ได้ — ตั้งจำนวนครั้งในหน้าแก้ไข'
+                          : undefined
+                      }
+                      onClick={() => toggleChanges(t)}
+                    />
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    onClick={() => toggle(t)}
-                    title={t.active ? 'ปิดไม่ให้เลือก' : 'เปิดให้เลือก'}
-                    className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-                  >
-                    <Power className="size-4.5" strokeWidth={1.8} />
-                  </button>
                   <button
                     onClick={() => setEditing(t)}
                     title="แก้ไข"
@@ -288,6 +354,52 @@ export function TracksManager({
   );
 }
 
+/**
+ * One of the two switches — การเลือก or การแก้ไข — with its state in words.
+ * Written out rather than an icon: "ปิดการแก้ไข" and "ปิดการเลือก" do different
+ * things to different students, and a lone power icon cannot say which.
+ */
+function SwitchButton({
+  on,
+  label,
+  onClick,
+  disabled,
+  title,
+}: {
+  on: boolean;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on && !disabled}
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? (on ? `กดเพื่อปิด${label}` : `กดเพื่อเปิด${label}`)}
+      className={cn(
+        'inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs font-medium transition-colors',
+        disabled
+          ? 'cursor-not-allowed border-border text-muted-foreground opacity-60'
+          : on
+            ? 'border-success/40 bg-success/10 text-success hover:bg-success/15'
+            : 'border-border bg-secondary/50 text-muted-foreground hover:bg-secondary',
+      )}
+    >
+      <span
+        className={cn(
+          'size-2 rounded-full',
+          disabled ? 'bg-muted-foreground/40' : on ? 'bg-success' : 'bg-muted-foreground/60',
+        )}
+      />
+      {disabled ? `${label}: ไม่มี` : `${label}: ${on ? 'เปิด' : 'ปิด'}`}
+    </button>
+  );
+}
+
 /** An option row being edited — `id` null until it has been saved once. */
 interface DraftOption {
   key: string;
@@ -324,6 +436,7 @@ function TrackForm({
   const [closesAt, setClosesAt] = useState(
     toSchoolDateTimeInput(track?.closesAt ? new Date(track.closesAt) : null),
   );
+  const [changeLimit, setChangeLimit] = useState(String(track?.changeLimit ?? 0));
   const [options, setOptions] = useState<DraftOption[]>(
     (track?.options ?? []).map((o) => ({
       key: `o${o.id}`,
@@ -390,6 +503,7 @@ function TrackForm({
       gradeLevels: grades,
       opensAt,
       closesAt,
+      changeLimit: Number(changeLimit),
       options: options
         .filter((o) => o.name.trim())
         .map((o) => ({
@@ -584,6 +698,28 @@ function TrackForm({
             </div>
           </div>
           <p className="mt-1.5 text-xs text-muted-foreground">{windowHint(opensAt, closesAt)}</p>
+        </div>
+
+        <div className="rounded-xl border border-border p-3.5">
+          <Label htmlFor="t-changes" className="flex items-center gap-2">
+            <Repeat className="size-4.5 text-muted-foreground" strokeWidth={1.8} />
+            นักเรียนเลือกแล้วแก้ไขได้กี่ครั้ง
+          </Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="t-changes"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={MAX_CHANGE_LIMIT}
+              step={1}
+              value={changeLimit}
+              onChange={(e) => setChangeLimit(e.target.value)}
+              className="h-10 w-24"
+            />
+            <span className="text-sm text-muted-foreground">ครั้ง</span>
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">{changeLimitHint(changeLimit)}</p>
         </div>
 
         <div>

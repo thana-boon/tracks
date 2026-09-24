@@ -21,6 +21,8 @@ function track(id: number, name: string, options: string[] = [], active = true):
     opensAt: null,
     closesAt: null,
     active,
+    changeLimit: 0,
+    changesOpen: true,
     options: options.map((o, i) => ({
       id: id * 100 + i,
       groupId: null,

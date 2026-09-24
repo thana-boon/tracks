@@ -3,15 +3,15 @@ import { db } from '@/db';
 import { people, trackChoices } from '@/db/schema';
 import { requireRole } from '@/lib/authz';
 import { allYears } from '@/lib/years';
-import { resolveTerm, tracksForTerm } from '@/lib/tracks';
+import { choiceByAdmin, resolveTerm, tracksForTerm } from '@/lib/tracks';
 import { NeedYear } from '@/components/ui';
 import { ChoicesManager, type ChoiceStudent } from './choices-manager';
 
 export const metadata = { title: 'การเลือก Track ของนักเรียน' };
 
 /**
- * Who chose what, and the only place a choice can be changed after the student
- * made it. Every นักเรียน of the ชั้น shows up, chosen or not: the question this
+ * Who chose what, and the place a choice can be changed once the student has
+ * no changes of their own left. Every นักเรียน of the ชั้น shows up, chosen or not: the question this
  * screen exists to answer is "ใครยังไม่เลือก", which a list of choices alone
  * cannot answer.
  */
@@ -50,6 +50,7 @@ export default async function TrackChoicesPage({
         optionId: trackChoices.optionId,
         chosenBy: trackChoices.chosenBy,
         changedBy: trackChoices.changedBy,
+        studentChanges: trackChoices.studentChanges,
       })
       .from(trackChoices)
       .where(
@@ -65,7 +66,8 @@ export default async function TrackChoicesPage({
       trackId: c?.trackId ?? null,
       optionId: c?.optionId ?? null,
       /** an admin who set or moved it — shown so an exception is visible as one */
-      byAdmin: c ? c.changedBy !== null || c.chosenBy.startsWith('admin:') : false,
+      byAdmin: c ? choiceByAdmin(c.chosenBy, c.changedBy) : false,
+      studentChanges: c?.studentChanges ?? 0,
     };
   });
 

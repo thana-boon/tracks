@@ -18,7 +18,9 @@ import { logActivity } from '@/lib/log';
 import { optionProblem } from '@/lib/tracks';
 import {
   GRADE_LEVELS,
+  MAX_CHANGE_LIMIT,
   SEMESTERS,
+  changeLimitLabel,
   trackAllows,
   trackPhaseLabel,
   trackWindow,
@@ -49,6 +51,14 @@ const TrackInput = z.object({
   /** "YYYY-MM-DDTHH:MM" in school time, or '' for "ไม่กำหนด" on that side */
   opensAt: z.string().trim().max(32).optional().default(''),
   closesAt: z.string().trim().max(32).optional().default(''),
+  /** นักเรียนเปลี่ยนเองได้กี่ครั้งหลังเลือก — 0 = เลือกได้ครั้งเดียว */
+  changeLimit: z
+    .number({ invalid_type_error: 'กรอกจำนวนครั้งที่แก้ไขได้' })
+    .int('จำนวนครั้งที่แก้ไขได้ต้องเป็นจำนวนเต็ม')
+    .min(0, 'จำนวนครั้งที่แก้ไขได้ติดลบไม่ได้')
+    .max(MAX_CHANGE_LIMIT, `แก้ไขได้ไม่เกิน ${MAX_CHANGE_LIMIT} ครั้ง`)
+    .optional()
+    .default(0),
   options: z.array(OptionInput).max(30),
 });
 
@@ -69,8 +79,18 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
   const parsed = TrackInput.safeParse(form);
   if (!parsed.success)
     return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
-  const { yearId, semester, groupId, phase, name, description, admissionNote, gradeLevels, options } =
-    parsed.data;
+  const {
+    yearId,
+    semester,
+    groupId,
+    phase,
+    name,
+    description,
+    admissionNote,
+    gradeLevels,
+    changeLimit,
+    options,
+  } = parsed.data;
 
   // ช่วงเวลาเปิด-ปิด. Either side may be left blank — an unfenced side means
   // "ไม่กำหนด", not "now". A blank string has to survive as null rather than
@@ -170,6 +190,7 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
             gradeLevels: grades,
             opensAt,
             closesAt,
+            changeLimit,
           })
           .where(eq(tracks.id, trackId));
       } else {
@@ -186,6 +207,7 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
             gradeLevels: grades,
             opensAt,
             closesAt,
+            changeLimit,
           })
           .returning({ id: tracks.id });
         trackId = created.id;
@@ -248,6 +270,7 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
     gradeLevels: grades,
     opensAt: opensAt?.toISOString(),
     closesAt: closesAt?.toISOString(),
+    changeLimit,
     options: options.length,
     removedOptions: removed,
   });
@@ -284,7 +307,7 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
     ok: true,
     message: `${id ? 'แก้ไข' : 'สร้าง'} “${name}” แล้ว${subjectNote}${
       options.length ? ` · ข้อย่อย ${options.length} รายการ` : ''
-    }${windowNote}`,
+    } · ${changeLimitLabel(changeLimit)}${windowNote}`,
   };
 }
 
@@ -299,6 +322,64 @@ export async function toggleTrack(id: number, active: boolean): Promise<ActionRe
     message: active
       ? 'เปิดให้เลือก Track นี้แล้ว'
       : 'ปิดไม่ให้เลือก Track นี้แล้ว — ผู้ที่เลือกไปแล้วไม่ถูกกระทบ',
+  };
+}
+
+/**
+ * เปิด-ปิดให้นักเรียนแก้ไข Track นี้ — apart from `toggleTrack` because the
+ * two answer different people: closing การเลือก keeps out those who have not
+ * chosen, closing การแก้ไข holds still those who have.
+ */
+export async function toggleTrackChanges(id: number, open: boolean): Promise<ActionResult> {
+  const user = await requireRole('admin');
+  await db.update(tracks).set({ changesOpen: open }).where(eq(tracks.id, id));
+  await logActivity(user, open ? 'open_track_changes' : 'close_track_changes', `track:${id}`);
+  revalidatePath('/admin/tracks');
+  revalidatePath('/student/track');
+  return {
+    ok: true,
+    message: open
+      ? 'เปิดให้นักเรียนแก้ไข Track นี้แล้ว — ตามจำนวนครั้งที่กำหนดไว้'
+      : 'ปิดการแก้ไข Track นี้แล้ว — นักเรียนที่เลือกไว้เปลี่ยนเองไม่ได้จนกว่าจะเปิด',
+  };
+}
+
+const TermSwitchInput = z.object({
+  yearId: z.number().int().positive(),
+  semester: z.number().int().refine((n) => SEMESTERS.includes(n as 1 | 2), 'ภาคเรียนไม่ถูกต้อง'),
+  /** 'choose' is การเลือก (`active`), 'change' is การแก้ไข (`changesOpen`) */
+  what: z.enum(['choose', 'change']),
+  on: z.boolean(),
+});
+
+/**
+ * Both switches, for every Track of one ภาคเรียน at once — the shape the
+ * decision usually takes ("ปิดรับทั้งหมดวันนี้"), and one click rather than
+ * one per สาย that a busy ผู้ดูแล could miss one of.
+ */
+export async function setTermSwitch(form: z.infer<typeof TermSwitchInput>): Promise<ActionResult> {
+  const user = await requireRole('admin');
+  const parsed = TermSwitchInput.safeParse(form);
+  if (!parsed.success)
+    return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
+  const { yearId, semester, what, on } = parsed.data;
+
+  const changed = await db
+    .update(tracks)
+    .set(what === 'choose' ? { active: on } : { changesOpen: on })
+    .where(and(eq(tracks.yearId, yearId), eq(tracks.semester, semester)))
+    .returning({ id: tracks.id });
+  await logActivity(user, 'set_track_term_switch', `term:${yearId}:${semester}`, {
+    what,
+    on,
+    tracks: changed.length,
+  });
+  revalidatePath('/admin/tracks');
+  revalidatePath('/student/track');
+  const label = what === 'choose' ? 'การเลือก' : 'การแก้ไข';
+  return {
+    ok: true,
+    message: `${on ? 'เปิด' : 'ปิด'}${label}ทุก Track ของภาคเรียนนี้แล้ว (${changed.length} Track)`,
   };
 }
 
@@ -332,11 +413,11 @@ const ChoiceInput = z.object({
 });
 
 /**
- * Set or move one student's Track — the admin's half of "เลือกได้ครั้งเดียว".
+ * Set or move one student's Track — the admin's half of the change rule.
  *
- * A student cannot reach this: their own action refuses the moment a row
- * exists, so every change after the first one comes through here and lands in
- * the activity log with a name against it.
+ * A student changes their own only as many times as their สาย allows; every
+ * change past that comes through here and lands in the activity log with a
+ * name against it. It does not spend one of the student's changes.
  */
 export async function setStudentChoice(form: z.infer<typeof ChoiceInput>): Promise<ActionResult> {
   const user = await requireRole('admin');

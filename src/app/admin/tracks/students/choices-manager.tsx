@@ -31,6 +31,8 @@ export interface ChoiceStudent {
   trackId: number | null;
   optionId: number | null;
   byAdmin: boolean;
+  /** ครั้งที่นักเรียนเปลี่ยนเองไปแล้วในภาคเรียนนี้ */
+  studentChanges: number;
 }
 
 type StatusFilter = 'all' | 'chosen' | 'pending';
@@ -253,6 +255,9 @@ export function ChoicesManager({
                           <Badge tone="primary">{track.name}</Badge>
                           {option ? <Badge tone="navy">{option.name}</Badge> : null}
                           {s.byAdmin ? <Badge tone="accent">ผู้ดูแลกำหนด</Badge> : null}
+                          {s.studentChanges ? (
+                            <Badge tone="secondary">แก้เอง {s.studentChanges} ครั้ง</Badge>
+                          ) : null}
                         </>
                       ) : (
                         <Badge tone="secondary">ยังไม่เลือก</Badge>

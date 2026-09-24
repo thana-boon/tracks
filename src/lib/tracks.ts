@@ -18,7 +18,7 @@ import type {
   TrackRow,
   TrackSubjectRow,
 } from './track-core';
-import { isSemester, subjectInTrack } from './track-core';
+import { choiceByAdmin, isSemester, subjectInTrack } from './track-core';
 import { buildTrackReport, type ReportStudent, type TrackReport } from './track-report';
 
 /**
@@ -105,6 +105,8 @@ export async function tracksForTerm(
       opensAt: tracks.opensAt,
       closesAt: tracks.closesAt,
       active: tracks.active,
+      changeLimit: tracks.changeLimit,
+      changesOpen: tracks.changesOpen,
     })
     .from(tracks)
     .leftJoin(trackGroups, eq(tracks.groupId, trackGroups.id))
@@ -204,6 +206,8 @@ export async function tracksForTerm(
     opensAt: t.opensAt?.toISOString() ?? null,
     closesAt: t.closesAt?.toISOString() ?? null,
     active: t.active,
+    changeLimit: t.changeLimit,
+    changesOpen: t.changesOpen,
     options: byTrack.get(t.id) ?? [],
     subjects: subjectsOf(t.groupId, t),
   }));
@@ -263,6 +267,8 @@ export interface ChoiceRow {
   chosenAt: Date;
   changedBy: string | null;
   changedAt: Date | null;
+  /** ครั้งที่นักเรียนเปลี่ยนเองไปแล้ว */
+  studentChanges: number;
 }
 
 /** What one student picked for one ภาคเรียน, or null. */
@@ -282,6 +288,7 @@ export async function choiceOf(
       chosenAt: trackChoices.chosenAt,
       changedBy: trackChoices.changedBy,
       changedAt: trackChoices.changedAt,
+      studentChanges: trackChoices.studentChanges,
     })
     .from(trackChoices)
     .innerJoin(tracks, eq(trackChoices.trackId, tracks.id))
@@ -312,6 +319,7 @@ export async function choiceHistoryOf(studentId: number): Promise<
       chosenAt: trackChoices.chosenAt,
       changedBy: trackChoices.changedBy,
       changedAt: trackChoices.changedAt,
+      studentChanges: trackChoices.studentChanges,
       year: academicYears.year,
       semester: trackChoices.semester,
     })
@@ -402,7 +410,7 @@ export async function trackReportFor(term: Term): Promise<TrackReport> {
 
   const students: ReportStudent[] = rows.map(({ chosenBy, changedBy, ...s }) => ({
     ...s,
-    byAdmin: chosenBy !== null && (changedBy !== null || chosenBy.startsWith('admin:')),
+    byAdmin: chosenBy !== null && choiceByAdmin(chosenBy, changedBy),
   }));
   return buildTrackReport(term, defined, students);
 }

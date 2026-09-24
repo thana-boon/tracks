@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { people } from '@/db/schema';
+import { people, tracks } from '@/db/schema';
 import { requireRole } from '@/lib/authz';
 import { EmptyState, NeedYear } from '@/components/ui';
-import { Route } from 'lucide-react';
+import { MessageCircleQuestion, Route } from 'lucide-react';
 import {
   choiceHistoryOf,
   choiceOf,
@@ -12,7 +12,7 @@ import {
   resolveTerm,
   tracksForTerm,
 } from '@/lib/tracks';
-import { trackAllows } from '@/lib/track-core';
+import { ADVICE_NOTE, changeStanding, choiceByAdmin, trackAllows } from '@/lib/track-core';
 import { TrackChooser } from './track-chooser';
 
 export const metadata = { title: 'เลือก Track' };
@@ -23,8 +23,9 @@ export const metadata = { title: 'เลือก Track' };
  * It opens on the ภาคเรียน that is currently offered ("ล่าสุดที่ตั้งไว้"), and
  * that is the only one it will accept a choice for; the other terms in the
  * switcher are the student's own history, read-only. Once a choice exists the
- * page stops offering and starts reporting: changing it is the ผู้ดูแล's job,
- * and the page says so rather than leaving a button that would only fail.
+ * page reports it, with how many changes the held สาย still allows — and offers
+ * the list again only while one is left, rather than a button that would only
+ * fail.
  */
 export default async function StudentTrackPage({
   searchParams,
@@ -54,6 +55,22 @@ export default async function StudentTrackPage({
     choiceHistoryOf(user.personId),
   ]);
 
+  // The held สาย is read on its own rather than out of `available`: it may
+  // since have been closed to new choices, and its limit still governs.
+  const [held] = choice
+    ? await db
+        .select({
+          changeLimit: tracks.changeLimit,
+          changesOpen: tracks.changesOpen,
+          opensAt: tracks.opensAt,
+          closesAt: tracks.closesAt,
+          active: tracks.active,
+        })
+        .from(tracks)
+        .where(eq(tracks.id, choice.trackId))
+        .limit(1)
+    : [];
+
   // A ม.4 is not offered the ม.6 สาย — filtering here rather than in the
   // chooser keeps the ineligible ones out of the browser altogether.
   const gradeLevel = student?.gradeLevel ?? null;
@@ -64,6 +81,19 @@ export default async function StudentTrackPage({
   // would disagree with the server it was rendered on — and with the action
   // that has the final say — by whatever the device's clock is out by.
   const now = new Date().toISOString();
+
+  const standing =
+    choice && held
+      ? changeStanding(
+          {
+            ...held,
+            opensAt: held.opensAt?.toISOString() ?? null,
+            closesAt: held.closesAt?.toISOString() ?? null,
+          },
+          choice.studentChanges,
+          new Date(now),
+        )
+      : null;
 
   // The switcher lists every ภาคเรียน that has Tracks; before the first one
   // exists there is still the open term to name.
@@ -79,10 +109,18 @@ export default async function StudentTrackPage({
           <Route className="size-6" strokeWidth={1.8} /> Track
         </h1>
         <p className="mt-1 text-sm text-white/70">
-          เลือกได้ครั้งเดียวต่อภาคเรียน — เปลี่ยนได้โดยติดต่อผู้ดูแลระบบเท่านั้น
+          เลือกได้ภาคเรียนละหนึ่ง Track — แต่ละ Track บอกไว้ว่าเลือกแล้วแก้ไขได้กี่ครั้ง
         </p>
         <div className="mt-4 h-0.5 w-10 rounded-full bg-[#F5C518]" />
       </section>
+
+      <p
+        role="note"
+        className="flex items-start gap-2.5 rounded-xl border border-[#F5C518]/50 bg-[#F5C518]/10 px-4 py-3 text-sm"
+      >
+        <MessageCircleQuestion className="mt-0.5 size-4.5 shrink-0" strokeWidth={1.8} />
+        {ADVICE_NOTE}
+      </p>
 
       <TrackChooser
         now={now}
@@ -95,10 +133,14 @@ export default async function StudentTrackPage({
         choice={
           choice
             ? {
+                trackId: choice.trackId,
+                optionId: choice.optionId,
                 trackName: choice.trackName,
                 optionName: choice.optionName,
                 chosenAt: choice.chosenAt.toISOString(),
-                changedByAdmin: choice.changedAt !== null,
+                changedByAdmin: choiceByAdmin(choice.chosenBy, choice.changedBy),
+                // Only the open term's choice can be changed; an old one is history.
+                change: isOpenTerm ? standing : null,
               }
             : null
         }

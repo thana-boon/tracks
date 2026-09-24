@@ -10,6 +10,7 @@ import {
   History,
   Info,
   Lock,
+  Repeat,
   Route,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -17,9 +18,12 @@ import { Badge, Button, Card, CardHeader, EmptyState, Select } from '@/component
 import { Modal, useDialog } from '@/components/dialog';
 import { SubjectList } from '@/components/track-subjects';
 import {
+  changeLimitLabel,
+  changeNote,
   termLabel,
   trackPhaseLabel,
   trackWindow,
+  type ChangeStanding,
   type Term,
   type TrackRow,
   type TrackWindow,
@@ -28,10 +32,14 @@ import { cn, thaiDateTimeLongOf } from '@/lib/utils';
 import { chooseTrack } from './actions';
 
 export interface MyChoice {
+  trackId: number;
+  optionId: number | null;
   trackName: string;
   optionName: string | null;
   chosenAt: string;
   changedByAdmin: boolean;
+  /** how many changes the held สาย still allows — null outside the open term */
+  change: ChangeStanding | null;
 }
 
 export interface HistoryRow {
@@ -80,8 +88,13 @@ export function TrackChooser({
   const [optionId, setOptionId] = useState<number | null>(null);
   const [detail, setDetail] = useState<TrackRow | null>(null);
   const [saving, setSaving] = useState(false);
+  /** the list reopened over an existing choice, to change it */
+  const [changing, setChanging] = useState(false);
 
   const selected = tracks.find((t) => t.id === trackId) ?? null;
+  const canChange = !!choice?.change && choice.change.blocked === null;
+  const unchanged =
+    !!choice && selected?.id === choice.trackId && (optionId ?? null) === choice.optionId;
 
   // ช่วงเวลาเปิด-ปิด, once per render for every สาย. A Track outside its window
   // is shown rather than hidden: "TrackSM เปิด 1 มิถุนายน" is the answer a
@@ -96,23 +109,45 @@ export function TrackChooser({
     router.push(`/student/track?year=${yearId}&semester=${semester}`);
   }
 
+  function startChange() {
+    if (!choice) return;
+    setTrackId(choice.trackId);
+    setOptionId(choice.optionId);
+    setChanging(true);
+  }
+
   async function submit() {
-    if (saving || !selected || !selectedOpen) return;
+    if (saving || !selected || !selectedOpen || unchanged) return;
     if (selected.options.length && !optionId) {
       toast.error(`เลือกข้อย่อยของ “${selected.name}” ด้วย`);
       return;
     }
-    // The last stop before a choice that only an admin can undo — said plainly,
-    // with the สาย and แขนง in it, because that is the sentence they have to
-    // agree with.
-    const ok = await dialog.confirm({
-      title: `ยืนยันเลือก “${selected.name}”?`,
-      description: `${
-        optionId
-          ? `ข้อย่อย: ${selected.options.find((o) => o.id === optionId)?.name} · `
-          : ''
-      }เลือกแล้วเปลี่ยนเองไม่ได้ ต้องติดต่อผู้ดูแลระบบ`,
-    });
+    // The last stop before the choice counts — said plainly, with the สาย, the
+    // แขนง and how many changes will be left, because that is the sentence
+    // they have to agree with.
+    const option = optionId
+      ? `ข้อย่อย: ${selected.options.find((o) => o.id === optionId)?.name} · `
+      : '';
+    const left = choice?.change ? choice.change.left - 1 : 0;
+    const ok = await dialog.confirm(
+      choice
+        ? {
+            title: `ยืนยันเปลี่ยนเป็น “${selected.name}”?`,
+            description: `${option}${
+              left > 0
+                ? `หลังเปลี่ยนแล้ว คุณจะแก้ไขได้อีก ${left} ครั้ง`
+                : 'นี่คือการแก้ไขครั้งสุดท้าย — หลังจากนี้เปลี่ยนเองไม่ได้อีก'
+            }`,
+          }
+        : {
+            title: `ยืนยันเลือก “${selected.name}”?`,
+            description: `${option}${
+              selected.changeLimit > 0
+                ? `เลือกแล้วแก้ไขได้อีก ${selected.changeLimit} ครั้ง`
+                : 'เลือกแล้วแก้ไขไม่ได้ — ต้องการเปลี่ยน ติดต่อฝ่ายวิชาการ'
+            }`,
+          },
+    );
     if (!ok) return;
 
     setSaving(true);
@@ -125,6 +160,9 @@ export function TrackChooser({
     setSaving(false);
     if (r.ok) {
       toast.success(r.message);
+      setChanging(false);
+      setTrackId(null);
+      setOptionId(null);
       router.refresh();
     } else {
       toast.error(r.message);
@@ -166,19 +204,43 @@ export function TrackChooser({
                   {choice.optionName}
                 </Badge>
               ) : null}
-              <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Lock className="size-3.5" strokeWidth={1.8} />
-                เลือกแล้ว — ต้องการเปลี่ยน ติดต่อผู้ดูแลระบบ
-              </p>
+              {choice.change ? (
+                <p
+                  className={cn(
+                    'mt-3 flex items-center gap-1.5 text-sm',
+                    canChange ? 'font-medium text-foreground' : 'text-muted-foreground',
+                  )}
+                >
+                  {canChange ? (
+                    <Repeat className="size-4 shrink-0" strokeWidth={1.8} />
+                  ) : (
+                    <Lock className="size-4 shrink-0" strokeWidth={1.8} />
+                  )}
+                  {changeNote(choice.change)}
+                </p>
+              ) : (
+                <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Lock className="size-3.5" strokeWidth={1.8} />
+                  เลือกแล้ว
+                </p>
+              )}
               {choice.changedByAdmin ? (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  รายการนี้ถูกปรับโดยผู้ดูแลระบบ
+                  รายการนี้ถูกปรับโดยฝ่ายวิชาการ
                 </p>
               ) : null}
             </div>
+            {canChange && !changing ? (
+              <Button variant="outline" size="sm" onClick={startChange} className="shrink-0">
+                <Repeat className="size-4" strokeWidth={1.8} />
+                เปลี่ยน Track
+              </Button>
+            ) : null}
           </div>
         </Card>
-      ) : !isOpenTerm ? (
+      ) : null}
+
+      {choice && !changing ? null : !isOpenTerm ? (
         <EmptyState
           icon={<History className="size-8" strokeWidth={1.5} />}
           title={`ไม่ได้เลือก Track ใน${termLabel(term)}`}
@@ -198,7 +260,7 @@ export function TrackChooser({
         <Card>
           <CardHeader
             icon={<Route className="size-4.5" strokeWidth={1.8} />}
-            title={`เลือก Track ของ${termLabel(term)}`}
+            title={changing ? 'เปลี่ยน Track' : `เลือก Track ของ${termLabel(term)}`}
           />
           <ul className="space-y-2.5 px-4 pb-4 sm:px-5">
             {tracks.map((t) => {
@@ -233,6 +295,7 @@ export function TrackChooser({
                       {t.options.length ? (
                         <Badge tone="secondary">มีข้อย่อย {t.options.length} รายการ</Badge>
                       ) : null}
+                      {choice?.trackId === t.id ? <Badge tone="primary">ที่เลือกไว้</Badge> : null}
                     </div>
                     {t.description ? (
                       <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
@@ -241,6 +304,14 @@ export function TrackChooser({
                       <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                         <CalendarClock className="size-3.5 shrink-0" strokeWidth={1.8} />
                         {note}
+                      </p>
+                    ) : null}
+                    {/* Changing spends the held สาย's allowance, not this one's —
+                        so the line is only worth reading before a first choice. */}
+                    {!choice ? (
+                      <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Repeat className="size-3.5 shrink-0" strokeWidth={1.8} />
+                        {changeLimitLabel(t.changeLimit)}
                       </p>
                     ) : null}
                   </button>
@@ -290,13 +361,32 @@ export function TrackChooser({
           </ul>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
             <p className="text-xs text-muted-foreground">
-              {anyOpen
-                ? 'ตรวจสอบให้แน่ใจก่อนกดยืนยัน — เลือกได้ครั้งเดียว'
-                : 'ยังไม่ถึงเวลาเลือก หรือหมดเวลาแล้ว — ดูวันเวลาที่แต่ละ Track'}
+              {!anyOpen
+                ? 'ยังไม่ถึงเวลาเลือก หรือหมดเวลาแล้ว — ดูวันเวลาที่แต่ละ Track'
+                : choice?.change
+                  ? `ตรวจสอบให้แน่ใจก่อนกดยืนยัน — ${changeNote(choice.change)}`
+                  : selected
+                    ? `ตรวจสอบให้แน่ใจก่อนกดยืนยัน — ${changeLimitLabel(selected.changeLimit)}`
+                    : 'ตรวจสอบให้แน่ใจก่อนกดยืนยัน'}
             </p>
-            <Button onClick={submit} disabled={saving || !selected || !selectedOpen}>
-              ยืนยันการเลือก
-            </Button>
+            <div className="flex items-center gap-2">
+              {changing ? (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setChanging(false);
+                    setTrackId(null);
+                    setOptionId(null);
+                  }}
+                  disabled={saving}
+                >
+                  ยกเลิก
+                </Button>
+              ) : null}
+              <Button onClick={submit} disabled={saving || !selected || !selectedOpen || unchanged}>
+                {changing ? 'ยืนยันการเปลี่ยน' : 'ยืนยันการเลือก'}
+              </Button>
+            </div>
           </div>
         </Card>
       )}

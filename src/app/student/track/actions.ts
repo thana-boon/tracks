@@ -8,7 +8,14 @@ import { people, trackChoices, tracks } from '@/db/schema';
 import { actorOf, requireRole } from '@/lib/authz';
 import { logActivity } from '@/lib/log';
 import { latestTerm, optionProblem } from '@/lib/tracks';
-import { SEMESTERS, trackAllows, trackWindow } from '@/lib/track-core';
+import {
+  SEMESTERS,
+  changeLimitLabel,
+  changeStanding,
+  trackAllows,
+  trackWindow,
+  type ChangeBlock,
+} from '@/lib/track-core';
 import { thaiDateTimeLongOf } from '@/lib/utils';
 import type { ActionResult } from '@/components/action-button';
 
@@ -20,17 +27,18 @@ const ChooseInput = z.object({
 });
 
 /**
- * A student choosing their own Track — once, for the ภาคเรียน that is open.
+ * A student choosing their own Track for the ภาคเรียน that is open — or, if
+ * they already hold one, changing it, as many times as that สาย allows.
  *
- * "เลือกได้ครั้งเดียว" is enforced twice on purpose: the check below gives the
- * student a sentence they can act on, and the unique index behind it is what
- * actually holds when two taps land at the same moment. Everything after the
- * first choice goes through the ผู้ดูแล screen instead, so a change always has a
- * name against it in the log.
+ * The limit is enforced twice on purpose: the check below gives the student a
+ * sentence they can act on, and the conditional update behind it (and the
+ * unique index for a first choice) is what actually holds when two taps land
+ * at the same moment. Past the limit, a change goes through the ผู้ดูแล screen
+ * instead, so it always has a name against it in the log.
  */
 export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<ActionResult> {
   const user = await requireRole('student');
-  if (!user.personId) return { ok: false, message: 'ไม่พบข้อมูลนักเรียน — ติดต่อผู้ดูแล' };
+  if (!user.personId) return { ok: false, message: 'ไม่พบข้อมูลนักเรียน — ติดต่อฝ่ายวิชาการ' };
 
   const parsed = ChooseInput.safeParse(form);
   if (!parsed.success)
@@ -49,7 +57,7 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
     .from(people)
     .where(eq(people.id, user.personId))
     .limit(1);
-  if (!student) return { ok: false, message: 'ไม่พบข้อมูลนักเรียน — ติดต่อผู้ดูแล' };
+  if (!student) return { ok: false, message: 'ไม่พบข้อมูลนักเรียน — ติดต่อฝ่ายวิชาการ' };
 
   const [track] = await db.select().from(tracks).where(eq(tracks.id, trackId)).limit(1);
   if (!track) return { ok: false, message: 'ไม่พบ Track นี้' };
@@ -80,7 +88,7 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
       ok: false,
       message: `หมดเวลาเลือก “${track.name}” แล้ว (ปิดรับ ${thaiDateTimeLongOf(
         timing.closesAt,
-      )} น.) — ติดต่อผู้ดูแลระบบ`,
+      )} น.) — ติดต่อฝ่ายวิชาการ`,
     };
   if (!trackAllows({ gradeLevels: track.gradeLevels ?? [] }, student.gradeLevel))
     return { ok: false, message: `“${track.name}” ไม่ได้เปิดให้ ${student.gradeLevel ?? 'ระดับชั้นของคุณ'}` };
@@ -88,9 +96,21 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
   const problem = await optionProblem(track, optionId);
   if (problem) return { ok: false, message: problem };
 
-  const existing = await db
-    .select({ id: trackChoices.id })
+  const [existing] = await db
+    .select({
+      id: trackChoices.id,
+      trackId: trackChoices.trackId,
+      optionId: trackChoices.optionId,
+      studentChanges: trackChoices.studentChanges,
+      heldName: tracks.name,
+      changeLimit: tracks.changeLimit,
+      changesOpen: tracks.changesOpen,
+      opensAt: tracks.opensAt,
+      closesAt: tracks.closesAt,
+      active: tracks.active,
+    })
     .from(trackChoices)
+    .innerJoin(tracks, eq(trackChoices.trackId, tracks.id))
     .where(
       and(
         eq(trackChoices.studentId, user.personId),
@@ -99,7 +119,63 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
       ),
     )
     .limit(1);
-  if (existing.length) return { ok: false, message: ALREADY_CHOSEN };
+
+  if (existing) {
+    // The สาย they hold decides whether they may leave it — its limit is the
+    // number they were shown when they chose it.
+    const standing = changeStanding(
+      {
+        changeLimit: existing.changeLimit,
+        changesOpen: existing.changesOpen,
+        active: existing.active,
+        opensAt: existing.opensAt?.toISOString() ?? null,
+        closesAt: existing.closesAt?.toISOString() ?? null,
+      },
+      existing.studentChanges,
+    );
+    if (standing.blocked) return { ok: false, message: CANNOT_CHANGE[standing.blocked] };
+    if (existing.trackId === trackId && existing.optionId === optionId)
+      return { ok: false, message: 'เป็นตัวเลือกเดิมอยู่แล้ว — ไม่มีอะไรเปลี่ยน' };
+
+    // Conditional on the count read above: a second tap racing this one finds
+    // it already spent and updates nothing, rather than both succeeding on a
+    // single remaining change.
+    const updated = await db
+      .update(trackChoices)
+      .set({
+        trackId,
+        optionId,
+        changedBy: actorOf(user),
+        changedAt: new Date(),
+        studentChanges: existing.studentChanges + 1,
+      })
+      .where(
+        and(
+          eq(trackChoices.id, existing.id),
+          eq(trackChoices.studentChanges, existing.studentChanges),
+        ),
+      )
+      .returning({ id: trackChoices.id });
+    if (!updated.length)
+      return { ok: false, message: 'มีการแก้ไขเกิดขึ้นพร้อมกัน — โหลดหน้าใหม่แล้วลองอีกครั้ง' };
+
+    const left = standing.left - 1;
+    await logActivity(user, 'change_track_self', `track:${trackId}`, {
+      from: existing.heldName,
+      track: track.name,
+      optionId,
+      semester,
+      change: existing.studentChanges + 1,
+      limit: standing.limit,
+    });
+    revalidateAll();
+    return {
+      ok: true,
+      message: `เปลี่ยนเป็น “${track.name}” แล้ว — ${
+        left > 0 ? `แก้ไขได้อีก ${left} ครั้ง` : 'ใช้สิทธิ์แก้ไขครบแล้ว'
+      }`,
+    };
+  }
 
   try {
     await db.insert(trackChoices).values({
@@ -113,7 +189,7 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
   } catch {
     // track_choices_term_student_uq — two taps, one row. The second one is not
     // an error worth a stack trace; it is the rule doing its job.
-    return { ok: false, message: ALREADY_CHOSEN };
+    return { ok: false, message: 'บันทึกการเลือกไปแล้ว — โหลดหน้าใหม่เพื่อดูผล' };
   }
 
   await logActivity(user, 'choose_track', `track:${trackId}`, {
@@ -121,11 +197,24 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
     optionId,
     semester,
   });
-  revalidatePath('/student');
-  revalidatePath('/student/track');
-  revalidatePath('/admin/tracks/students');
-  return { ok: true, message: `เลือก “${track.name}” เรียบร้อยแล้ว` };
+  revalidateAll();
+  return {
+    ok: true,
+    message: `เลือก “${track.name}” เรียบร้อยแล้ว — ${changeLimitLabel(track.changeLimit)}`,
+  };
 }
 
-const ALREADY_CHOSEN =
-  'คุณเลือก Track ของภาคเรียนนี้ไปแล้ว — เปลี่ยนได้โดยติดต่อผู้ดูแลระบบเท่านั้น';
+function revalidateAll() {
+  revalidatePath('/student');
+  revalidatePath('/student/track');
+  revalidatePath('/admin/tracks');
+  revalidatePath('/admin/tracks/students');
+}
+
+/** What the นักเรียน is told when their held สาย will not let them change. */
+const CANNOT_CHANGE: Record<ChangeBlock, string> = {
+  none: 'Track ที่เลือกไว้กำหนดให้แก้ไขไม่ได้ — ต้องการเปลี่ยน ติดต่อฝ่ายวิชาการ',
+  used: 'คุณใช้สิทธิ์แก้ไขครบแล้ว — ต้องการเปลี่ยน ติดต่อฝ่ายวิชาการ',
+  frozen: 'ขณะนี้ปิดการแก้ไข Track — รอเปิดอีกครั้ง หรือติดต่อฝ่ายวิชาการ',
+  after: 'หมดเวลาแก้ไขแล้ว — ต้องการเปลี่ยน ติดต่อฝ่ายวิชาการ',
+};

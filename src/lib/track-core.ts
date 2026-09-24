@@ -77,6 +77,10 @@ export interface TrackRow {
   opensAt: string | null;
   closesAt: string | null;
   active: boolean;
+  /** นักเรียนที่ถือสายนี้เปลี่ยนเองได้กี่ครั้ง — 0 = เลือกแล้วแก้ไม่ได้ */
+  changeLimit: number;
+  /** ผู้ดูแลเปิดให้นักเรียนแก้ไขอยู่หรือไม่ */
+  changesOpen: boolean;
   options: TrackOptionRow[];
   /** วิชาที่นักเรียนจะได้เรียนถ้าเลือกสายนี้ */
   subjects: TrackSubjectRow[];
@@ -159,4 +163,94 @@ export function trackChoosable(
 /** Whether a student of this ชั้น may choose the track. Empty list = every ชั้น. */
 export function trackAllows(track: { gradeLevels: string[] }, gradeLevel: string | null): boolean {
   return track.gradeLevels.length === 0 || (!!gradeLevel && track.gradeLevels.includes(gradeLevel));
+}
+
+/**
+ * Where a นักเรียน who cannot choose, or is unsure, should go — said on the
+ * นักเรียน screen whatever state it is in. People rather than "ผู้ดูแลระบบ":
+ * the person who can actually help a ม.4 decide is their ครูประจำชั้น, and the
+ * one who can move them is ฝ่ายวิชาการ.
+ */
+export const ADVICE_NOTE =
+  'หากเลือกไม่ได้ หรือต้องการคำปรึกษา ให้ปรึกษาครูประจำชั้น หรือติดต่อฝ่ายวิชาการ';
+
+/** The most changes a สาย may allow — beyond this a limit is no limit at all. */
+export const MAX_CHANGE_LIMIT = 10;
+
+/** The limit a สาย carries, in the words the นักเรียน reads before choosing it. */
+export function changeLimitLabel(limit: number): string {
+  return limit > 0 ? `เลือกแล้วแก้ไขได้ ${limit} ครั้ง` : 'เลือกแล้วแก้ไขไม่ได้';
+}
+
+/**
+ * Why a นักเรียน may not change the สาย they hold right now, or null if they may.
+ *
+ * 'none' — the สาย never allowed a change; 'used' — they have spent them all;
+ * 'frozen' — the ผู้ดูแล has closed editing; 'after' — the สาย's ปิดรับ has
+ * passed, and a deadline for choosing is a deadline for changing too.
+ */
+export type ChangeBlock = 'none' | 'used' | 'frozen' | 'after';
+
+export interface ChangeStanding {
+  limit: number;
+  used: number;
+  left: number;
+  blocked: ChangeBlock | null;
+}
+
+/**
+ * Whether the holder of a สาย may change it themselves — read off the สาย they
+ * hold, not the one they are moving to: its limit is the number they agreed
+ * to when they chose it. Whether the new สาย will *take* them is a separate
+ * question (its own switch, window and ระดับชั้น), asked by the action.
+ */
+export function changeStanding(
+  held: {
+    changeLimit: number;
+    changesOpen: boolean;
+    opensAt: string | null;
+    closesAt: string | null;
+    active: boolean;
+  },
+  used: number,
+  now: Date = new Date(),
+): ChangeStanding {
+  const limit = held.changeLimit;
+  const left = Math.max(0, limit - used);
+  const blocked: ChangeBlock | null =
+    limit <= 0
+      ? 'none'
+      : left === 0
+        ? 'used'
+        : !held.changesOpen
+          ? 'frozen'
+          : trackWindow(held, now).state === 'after'
+            ? 'after'
+            : null;
+  return { limit, used, left, blocked };
+}
+
+/** The line a นักเรียน reads under their choice — how many changes they have. */
+export function changeNote(s: ChangeStanding): string {
+  switch (s.blocked) {
+    case 'none':
+      return 'เลือกแล้วแก้ไขไม่ได้';
+    case 'used':
+      return `ใช้สิทธิ์แก้ไขครบ ${s.limit} ครั้งแล้ว`;
+    case 'frozen':
+      return `ขณะนี้ปิดการแก้ไข — คุณยังแก้ได้อีก ${s.left} ครั้ง เมื่อเปิดอีกครั้ง`;
+    case 'after':
+      return 'หมดเวลาแก้ไขแล้ว';
+    default:
+      return `คุณแก้ไขได้อีก ${s.left} ครั้ง (จากทั้งหมด ${s.limit} ครั้ง)`;
+  }
+}
+
+/**
+ * Whether a choice as it stands now was put there by a ผู้ดูแล — the last hand
+ * on it decides. A นักเรียน who changes their own mind after being placed is
+ * back to "เลือกเอง".
+ */
+export function choiceByAdmin(chosenBy: string, changedBy: string | null): boolean {
+  return (changedBy ?? chosenBy).startsWith('admin:');
 }

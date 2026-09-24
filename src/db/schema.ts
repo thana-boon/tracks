@@ -375,8 +375,8 @@ export const activityLogs = pgTable(
 // ── Track (สายการเรียน) ─────────────────────────────────────
 // A different thing from track_groups/track_subjects above: those are the
 // catalogue of วิชาเสริม a student is *assigned* to by an admin. A Track is the
-// สายการเรียน a student *chooses for themselves*, once, for one ภาคเรียน — and
-// once chosen only an admin can move them.
+// สายการเรียน a student *chooses for themselves* for one ภาคเรียน — and may
+// change only as many times as the สาย allows; after that only an admin can.
 //
 // Scoped to a year *and* a ภาคเรียน because the offer changes between terms,
 // and to a set of ระดับชั้น because ม.4 and ม.6 are not offered the same สาย.
@@ -422,7 +422,19 @@ export const tracks = pgTable(
      */
     opensAt: timestamp('opens_at'),
     closesAt: timestamp('closes_at'),
+    /** เปิดให้นักเรียนเลือกสายนี้ — the ผู้ดูแล's switch, which outranks the window */
     active: boolean('active').notNull().default(true),
+    /**
+     * นักเรียนที่ถือสายนี้อยู่ เปลี่ยนเองได้กี่ครั้งในภาคเรียน — 0 is the old
+     * "เลือกได้ครั้งเดียว". Read off the สาย the student currently holds: it is
+     * the number they were shown when they chose it.
+     */
+    changeLimit: integer('change_limit').notNull().default(0),
+    /**
+     * เปิดให้นักเรียนแก้ไข — a second switch beside `active`, so the ผู้ดูแล can
+     * freeze changes (ช่วงจัดห้อง) without closing the สาย to those yet to choose.
+     */
+    changesOpen: boolean('changes_open').notNull().default(true),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (t) => [
@@ -458,10 +470,10 @@ export const trackOptions = pgTable(
 );
 
 // ── การเลือก Track ของนักเรียน ──────────────────────────────
-// One row per student per ภาคเรียน — that is what "เลือกได้ครั้งเดียว" means, and
-// the unique index is what enforces it rather than a check the UI could be
-// talked out of. The row is never deleted by a student: an admin moving someone
-// updates it in place and `changedBy`/`changedAt` records who did.
+// One row per student per ภาคเรียน, enforced by the unique index rather than a
+// check the UI could be talked out of. The row is never deleted by a student:
+// changing their mind (within the สาย's `changeLimit`) updates it in place, as
+// does an admin moving them — `changedBy`/`changedAt` records who last did.
 export const trackChoices = pgTable(
   'track_choices',
   {
@@ -484,6 +496,12 @@ export const trackChoices = pgTable(
     /** set only when an admin has since moved them */
     changedBy: text('changed_by'),
     changedAt: timestamp('changed_at'),
+    /**
+     * ครั้งที่นักเรียนเปลี่ยนเองไปแล้ว — counted against the held สาย's
+     * `changeLimit`. An admin move does not add to it: that is the school's
+     * decision, not one of the student's.
+     */
+    studentChanges: integer('student_changes').notNull().default(0),
   },
   (t) => [
     uniqueIndex('track_choices_term_student_uq').on(t.yearId, t.semester, t.studentId),
