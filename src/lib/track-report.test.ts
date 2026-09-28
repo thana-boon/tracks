@@ -195,3 +195,32 @@ test('a term with nobody chosen reports 0% rather than NaN', () => {
   const counts = reportSheets(r).find((s) => s.name === 'สรุปจำนวนแต่ละ Track')!;
   assert.equal(counts.rows[0][3], '0%');
 });
+
+test('only the ชั้น some สาย is open to are counted', () => {
+  const m4 = { ...track(1, 'A'), gradeLevels: ['ม.4'] };
+  const r = buildTrackReport(term, [m4], [
+    student({ trackId: 1, trackName: 'A' }),
+    student(),
+    student({ gradeLevel: 'ม.5' }),
+    student({ gradeLevel: 'ม.6' }),
+  ]);
+  assert.deepEqual(r.gradeLevels, ['ม.4']);
+  assert.deepEqual(r.totals, { students: 2, chosen: 1, pending: 1 });
+  assert.ok(r.rooms.every((room) => room.gradeLevel === 'ม.4'));
+});
+
+test('a chosen student outside the open ชั้น is kept, and a สาย open to all keeps everyone', () => {
+  const m4 = { ...track(1, 'A'), gradeLevels: ['ม.4'] };
+  const placed = buildTrackReport(term, [m4], [
+    student({ gradeLevel: 'ม.5', trackId: 1, trackName: 'A', byAdmin: true }),
+    student({ gradeLevel: 'ม.5' }),
+  ]);
+  assert.deepEqual(placed.totals, { students: 1, chosen: 1, pending: 0 });
+
+  const open = buildTrackReport(term, [m4, track(2, 'B')], [
+    student(),
+    student({ gradeLevel: 'ม.6' }),
+  ]);
+  assert.equal(open.gradeLevels, null);
+  assert.equal(open.totals.students, 2);
+});

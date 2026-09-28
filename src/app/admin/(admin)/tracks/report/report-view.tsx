@@ -52,6 +52,9 @@ export function ReportView({
           <h1 className="text-2xl font-semibold tracking-tight">รายงานสรุปการเลือก Track</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             ปีการศึกษา {term.year} ภาคเรียนที่ {term.semester} ·{' '}
+            {report.gradeLevels && (
+              <>นับเฉพาะ {report.gradeLevels.join(', ') || 'ชั้นที่เปิดรับ'} · </>
+            )}
             <Link
               href={`/admin/tracks/students?year=${term.yearId}&semester=${term.semester}`}
               className="font-medium text-primary hover:underline"

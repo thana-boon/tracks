@@ -58,6 +58,8 @@ export interface RoomTally {
 
 export interface TrackReport {
   term: Term;
+  /** ระดับชั้นที่เปิดรับในภาคเรียนนี้ — null when some สาย is open to every ชั้น */
+  gradeLevels: string[] | null;
   students: ReportStudent[];
   tracks: TrackTally[];
   rooms: RoomTally[];
@@ -76,6 +78,15 @@ function byThai(a: string, b: string): number {
 }
 
 /**
+ * The ชั้น the ภาคเรียน's สาย are open to, in ชั้น order — null when any one of
+ * them is open to every ชั้น (an empty gradeLevels), since then nobody is out.
+ */
+export function openGrades(tracks: { gradeLevels: string[] }[]): string[] | null {
+  if (tracks.some((t) => t.gradeLevels.length === 0)) return null;
+  return [...new Set(tracks.flatMap((t) => t.gradeLevels))].sort(byThai);
+}
+
+/**
  * One report out of the rows for one ภาคเรียน. `students` arrives already
  * joined to its choice, and `tracks` is every สาย defined in the term — a สาย
  * nobody picked still belongs in the summary, as a zero, which is exactly the
@@ -84,8 +95,20 @@ function byThai(a: string, b: string): number {
 export function buildTrackReport(
   term: Term,
   tracks: TrackRow[],
-  students: ReportStudent[],
+  everyone: ReportStudent[],
 ): TrackReport {
+  const gradeLevels = openGrades(tracks);
+  // Only the ชั้น some สาย of this ภาคเรียน is open to: a ม.5 who was never
+  // offered a Track is not "ยังไม่เลือก", and counting them drags every % down.
+  // A choice already on record is kept whatever the ชั้น — an ผู้ดูแล may have
+  // placed someone by hand, and a report that loses a chosen student lies.
+  const students = gradeLevels
+    ? everyone.filter(
+        (s) =>
+          (s.gradeLevel !== null && gradeLevels.includes(s.gradeLevel)) ||
+          (s.trackId !== null && tracks.some((t) => t.id === s.trackId)),
+      )
+    : everyone;
   const tallies = new Map<number, TrackTally>(
     tracks.map((t) => [
       t.id,
@@ -181,6 +204,7 @@ export function buildTrackReport(
   const chosen = students.length - pending.length;
   return {
     term,
+    gradeLevels,
     students,
     tracks: trackList,
     rooms: roomList,
