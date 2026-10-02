@@ -1,13 +1,28 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChartPie, ChevronRight, Download, Route, Search, Users, UsersRound } from 'lucide-react';
+import {
+  ChartPie,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Route,
+  Search,
+  UserX,
+  Users,
+  UsersRound,
+} from 'lucide-react';
 import { Modal } from '@/components/dialog';
-import { Badge, Card, CardHeader, EmptyState, Input, Select } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, EmptyState, Input, Select } from '@/components/ui';
 import { SEMESTERS, type Term } from '@/lib/track-core';
-import type { ReportStudent, TrackReport, TrackTally } from '@/lib/track-report';
+import {
+  roomLabel,
+  type ReportStudent,
+  type TrackReport,
+  type TrackTally,
+} from '@/lib/track-report';
 import { cn } from '@/lib/utils';
 
 type Tab = 'tracks' | 'rooms' | 'students';
@@ -323,11 +338,24 @@ function TrackStudentsModal({ track, onClose }: { track: TrackTally; onClose: ()
 /** ห้อง × สาย — the table a ครูที่ปรึกษา reads across their own row. */
 function RoomTab({ report }: { report: TrackReport }) {
   const { rooms, tracks } = report;
+  const [pendingRoom, setPendingRoom] = useState<string | null>(null);
+  const firstPending = rooms.find((r) => r.pending > 0);
   return (
     <Card>
       <CardHeader
         icon={<UsersRound className="size-4.5" strokeWidth={1.8} />}
         title={`ห้องเรียน ${n(rooms.length)} ห้อง`}
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!firstPending}
+            onClick={() => firstPending && setPendingRoom(roomLabel(firstPending))}
+          >
+            <UserX className="size-4" strokeWidth={1.8} />
+            รายชื่อที่ยังไม่เลือก ทีละห้อง
+          </Button>
+        }
       />
       {/* One column per สาย overflows a phone long before it overflows the
           data — the table scrolls itself rather than the page. */}
@@ -358,7 +386,17 @@ function RoomTab({ report }: { report: TrackReport }) {
                     r.pending > 0 ? 'font-medium text-destructive' : 'text-muted-foreground',
                   )}
                 >
-                  {n(r.pending)}
+                  {r.pending > 0 ? (
+                    <button
+                      onClick={() => setPendingRoom(roomLabel(r))}
+                      className="rounded px-1.5 underline decoration-dotted underline-offset-4 hover:bg-destructive/10"
+                      title={`ดูรายชื่อห้อง ${r.gradeLevel}/${r.classroom} ที่ยังไม่เลือก`}
+                    >
+                      {n(r.pending)}
+                    </button>
+                  ) : (
+                    n(r.pending)
+                  )}
                 </td>
                 {tracks.map((t) => {
                   const c = r.byTrack.find((x) => x.trackId === t.id)?.count ?? 0;
@@ -379,7 +417,133 @@ function RoomTab({ report }: { report: TrackReport }) {
           </tbody>
         </table>
       </div>
+      {pendingRoom ? (
+        <PendingRoomModal
+          report={report}
+          room={pendingRoom}
+          onRoom={setPendingRoom}
+          onClose={() => setPendingRoom(null)}
+        />
+      ) : null}
     </Card>
+  );
+}
+
+/**
+ * Who in one ห้อง has not chosen yet, one ห้อง at a time — laid out to be
+ * captured and sent to that ห้อง's ครูที่ปรึกษา or group chat as it stands:
+ * the ห้อง, the ภาคเรียน and the count in the heading, the names in เลขที่
+ * order. ← → (or the buttons) step through only the ห้อง that still owe a
+ * choice, so going round every ห้อง is one capture per press.
+ */
+function PendingRoomModal({
+  report,
+  room,
+  onRoom,
+  onClose,
+}: {
+  report: TrackReport;
+  room: string;
+  onRoom: (room: string) => void;
+  onClose: () => void;
+}) {
+  const owing = useMemo(() => report.rooms.filter((r) => r.pending > 0), [report.rooms]);
+  const byRoom = useMemo(() => {
+    const map = new Map<string, ReportStudent[]>();
+    for (const s of report.pending) {
+      const key = roomLabel(s);
+      map.set(key, [...(map.get(key) ?? []), s]);
+    }
+    for (const list of map.values()) {
+      list.sort(
+        (a, b) =>
+          (a.classNumber ?? Infinity) - (b.classNumber ?? Infinity) ||
+          a.code.localeCompare(b.code, 'th', { numeric: true }),
+      );
+    }
+    return map;
+  }, [report.pending]);
+
+  const at = owing.findIndex((r) => roomLabel(r) === room);
+  const current = owing[at];
+  const students = byRoom.get(room) ?? [];
+  const prev = at > 0 ? owing[at - 1] : null;
+  const next = at >= 0 && at < owing.length - 1 ? owing[at + 1] : null;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) return;
+      if (e.key === 'ArrowLeft' && prev) onRoom(roomLabel(prev));
+      if (e.key === 'ArrowRight' && next) onRoom(roomLabel(next));
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [prev, next, onRoom]);
+
+  return (
+    <Modal onClose={onClose} labelledBy="pending-room-title" className="max-w-lg">
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!prev}
+          onClick={() => prev && onRoom(roomLabel(prev))}
+          aria-label="ห้องก่อนหน้า"
+        >
+          <ChevronLeft className="size-4" strokeWidth={1.8} />
+        </Button>
+        <Select value={room} onChange={(e) => onRoom(e.target.value)} className="h-9 flex-1">
+          {owing.map((r) => (
+            <option key={roomLabel(r)} value={roomLabel(r)}>
+              {r.gradeLevel}/{r.classroom} — ยังไม่เลือก {n(r.pending)} คน
+            </option>
+          ))}
+        </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!next}
+          onClick={() => next && onRoom(roomLabel(next))}
+          aria-label="ห้องถัดไป"
+        >
+          <ChevronRight className="size-4" strokeWidth={1.8} />
+        </Button>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-border/60 bg-card p-4">
+        <h2 id="pending-room-title" className="text-lg font-semibold">
+          ห้อง {room} · ยังไม่เลือก Track{' '}
+          <span className="text-destructive">{n(students.length)} คน</span>
+        </h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          ปีการศึกษา {report.term.year} ภาคเรียนที่ {report.term.semester}
+          {current ? ` · เลือกแล้ว ${n(current.chosen)} จาก ${n(current.total)} คน` : ''}
+        </p>
+        {students.length ? (
+          <ol className="mt-3 divide-y divide-border/40 border-t border-border/60">
+            {students.map((s) => (
+              <li key={s.id} className="flex items-baseline gap-3 py-1.5 text-sm">
+                <span className="w-8 shrink-0 text-right tabular-nums text-muted-foreground">
+                  {s.classNumber ?? '–'}
+                </span>
+                <span className="min-w-0 flex-1">
+                  {s.fullName}
+                  {s.nickname ? (
+                    <span className="text-muted-foreground"> ({s.nickname})</span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                  {s.code}
+                </span>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">ทุกคนในห้องนี้เลือกแล้ว</p>
+        )}
+      </div>
+    </Modal>
   );
 }
 
