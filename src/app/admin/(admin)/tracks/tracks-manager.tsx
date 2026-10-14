@@ -588,6 +588,7 @@ function TrackForm({
     <Modal
       onClose={onClose}
       labelledBy="track-form-title"
+      className="max-w-3xl"
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={saving}>
@@ -825,9 +826,9 @@ function TrackForm({
           </div>
 
           {options.length ? (
-            <ul className="mt-3 space-y-3">
+            <ul className="mt-3 grid gap-3 lg:grid-cols-2">
               {options.map((o) => (
-                <li key={o.key} className="flex items-start gap-2">
+                <li key={o.key} className="flex items-start gap-2 rounded-lg border border-border/60 p-2.5">
                   <div className="min-w-0 flex-1 space-y-2">
                     <Input
                       value={o.name}

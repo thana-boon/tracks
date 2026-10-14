@@ -46,6 +46,12 @@ export interface TrackTally {
   total: number;
   /** empty when the สาย has no แขนง */
   options: OptionTally[];
+  /** เปิดให้จัดอันดับข้อย่อยอยู่หรือไม่ */
+  rankingOpen: boolean;
+  /** ผู้ถือสายนี้ที่จัดอันดับข้อย่อยแล้ว — 0 on a สาย with no ข้อย่อย */
+  ranked: number;
+  /** ผู้ถือสายนี้ที่ยังไม่จัดอันดับ — empty on a สาย with no ข้อย่อย */
+  unranked: ReportStudent[];
   /** ระดับชั้น that actually chose it, in ชั้น order */
   byGrade: { grade: string; count: number }[];
   students: ReportStudent[];
@@ -129,6 +135,9 @@ export function buildTrackReport(
           count: 0,
           byRank: Array<number>(RANK_COUNT).fill(0),
         })),
+        rankingOpen: t.rankingOpen,
+        ranked: 0,
+        unranked: [],
         byGrade: [],
         students: [],
       },
@@ -176,6 +185,10 @@ export function buildTrackReport(
       const opt = tally.options.find((o) => o.id === id);
       if (opt && i < RANK_COUNT) opt.byRank[i]++;
     });
+    if (tally.options.length) {
+      if (s.ranked.length) tally.ranked++;
+      else tally.unranked.push(s);
+    }
     const grade = s.gradeLevel ?? '—';
     const grades = gradeCounts.get(tally.id) ?? new Map<string, number>();
     grades.set(grade, (grades.get(grade) ?? 0) + 1);
@@ -187,12 +200,8 @@ export function buildTrackReport(
     t.byGrade = [...(gradeCounts.get(t.id) ?? new Map())]
       .map(([grade, count]) => ({ grade, count }))
       .sort((a, b) => byThai(a.grade, b.grade));
-    t.students.sort(
-      (a, b) =>
-        byThai(a.gradeLevel ?? '', b.gradeLevel ?? '') ||
-        byThai(a.classroom ?? '', b.classroom ?? '') ||
-        (a.classNumber ?? 0) - (b.classNumber ?? 0),
-    );
+    t.students.sort(byRoomAndNumber);
+    t.unranked.sort(byRoomAndNumber);
   }
   // Biggest สาย first — a summary is read for its shape, and the ranking is
   // the shape. Ties fall back to the name so the order never wobbles.
@@ -225,6 +234,14 @@ export function buildTrackReport(
     totals: { students: students.length, chosen, pending: pending.length },
     pending,
   };
+}
+
+function byRoomAndNumber(a: ReportStudent, b: ReportStudent): number {
+  return (
+    byThai(a.gradeLevel ?? '', b.gradeLevel ?? '') ||
+    byThai(a.classroom ?? '', b.classroom ?? '') ||
+    (a.classNumber ?? 0) - (b.classNumber ?? 0)
+  );
 }
 
 // ── the workbook ─────────────────────────────────────────────
@@ -338,7 +355,20 @@ export function reportSheets(report: TrackReport): Sheet[] {
     ]),
   }));
 
-  return [everyone, counts, byRoom, stillPending, ...rosters];
+  // ใครยังไม่จัดอันดับข้อย่อย — only when some สาย has ข้อย่อย to rank.
+  const ranking = tracks.filter((t) => t.options.length);
+  const notRanked: Sheet[] = ranking.length
+    ? [
+        {
+          name: 'ยังไม่จัดอันดับข้อย่อย',
+          header: ['Track', ...PERSON_HEADER],
+          widths: [24, ...PERSON_WIDTHS],
+          rows: ranking.flatMap((t) => t.unranked.map((s) => [t.name, ...personCells(s)])),
+        },
+      ]
+    : [];
+
+  return [everyone, counts, byRoom, stillPending, ...notRanked, ...rosters];
 }
 
 /** `Track-2569-1.xlsx` — sortable, and safe on every filesystem. */

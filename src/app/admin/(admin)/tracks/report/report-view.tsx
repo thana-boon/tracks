@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  ListOrdered,
   Route,
   Search,
   UserX,
@@ -25,12 +26,17 @@ import {
 } from '@/lib/track-report';
 import { cn } from '@/lib/utils';
 
-type Tab = 'tracks' | 'rooms' | 'students';
+type Tab = 'tracks' | 'rooms' | 'students' | 'ranking';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'tracks', label: 'แยกตาม Track', icon: <Route className="size-4" strokeWidth={1.9} /> },
   { id: 'rooms', label: 'แยกตามห้อง', icon: <UsersRound className="size-4" strokeWidth={1.9} /> },
   { id: 'students', label: 'รายบุคคล', icon: <Users className="size-4" strokeWidth={1.9} /> },
+  {
+    id: 'ranking',
+    label: 'จัดอันดับข้อย่อย',
+    icon: <ListOrdered className="size-4" strokeWidth={1.9} />,
+  },
 ];
 
 function n(v: number) {
@@ -59,6 +65,8 @@ export function ReportView({
   }
 
   const done = totals.students ? Math.round((totals.chosen / totals.students) * 100) : 0;
+  // The ranking tab only exists while some สาย has ข้อย่อย to rank.
+  const tabs = tracks.some((t) => t.options.length) ? TABS : TABS.filter((t) => t.id !== 'ranking');
 
   return (
     <div className="space-y-6">
@@ -131,7 +139,7 @@ export function ReportView({
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
-            {TABS.map((t) => (
+            {tabs.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
@@ -151,6 +159,7 @@ export function ReportView({
           {tab === 'tracks' ? <TrackTab report={report} /> : null}
           {tab === 'rooms' ? <RoomTab report={report} /> : null}
           {tab === 'students' ? <StudentTab report={report} /> : null}
+          {tab === 'ranking' ? <RankingTab report={report} /> : null}
         </>
       )}
     </div>
@@ -639,6 +648,178 @@ function StudentTab({ report }: { report: TrackReport }) {
         </ul>
       )}
     </Card>
+  );
+}
+
+/**
+ * จัดอันดับข้อย่อยแล้วกี่คน และใครยังไม่ทำ — per สาย, since only its own
+ * holders can rank its ข้อย่อย. The chase list is grouped by ห้อง, the unit a
+ * ครูที่ปรึกษา is sent to follow up on.
+ */
+function RankingTab({ report }: { report: TrackReport }) {
+  const ranking = report.tracks.filter((t) => t.options.length);
+  const [trackId, setTrackId] = useState(ranking[0]?.id ?? 0);
+  const [q, setQ] = useState('');
+  const track = ranking.find((t) => t.id === trackId) ?? ranking[0];
+
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!track) return [];
+    return track.unranked.filter(
+      (s) =>
+        !needle ||
+        s.fullName.toLowerCase().includes(needle) ||
+        s.code.toLowerCase().includes(needle) ||
+        (s.nickname ?? '').toLowerCase().includes(needle) ||
+        `${s.gradeLevel}/${s.classroom}`.includes(needle),
+    );
+  }, [track, q]);
+
+  const byRoom = useMemo(() => {
+    const m = new Map<string, ReportStudent[]>();
+    for (const s of shown) {
+      const k = roomLabel(s);
+      m.set(k, [...(m.get(k) ?? []), s]);
+    }
+    return [...m];
+  }, [shown]);
+
+  if (!track) return null;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader
+          icon={<ListOrdered className="size-4.5" strokeWidth={1.8} />}
+          title="ความคืบหน้าการจัดอันดับข้อย่อย"
+        />
+        <ul className="divide-y divide-border/60 border-t border-border/60">
+          {ranking.map((t) => {
+            const pct = t.total ? Math.round((t.ranked / t.total) * 100) : 0;
+            const on = t.id === track.id;
+            return (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  onClick={() => setTrackId(t.id)}
+                  className={cn(
+                    'flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors sm:px-5',
+                    on ? 'bg-primary/5' : 'hover:bg-secondary/40',
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                      {t.name}
+                      <Badge tone={t.rankingOpen ? 'primary' : 'secondary'}>
+                        {t.rankingOpen ? 'เปิดให้จัดอันดับ' : 'ปิดการจัดอันดับ'}
+                      </Badge>
+                    </p>
+                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                    </div>
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      จัดแล้ว {n(t.ranked)} · ยังไม่จัด{' '}
+                      <span className={cn(t.unranked.length && 'font-medium text-destructive')}>
+                        {n(t.unranked.length)}
+                      </span>{' '}
+                      จากผู้เลือก {n(t.total)} คน
+                    </p>
+                  </div>
+                  <p className="shrink-0 text-lg font-semibold tabular-nums">{pct}%</p>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+
+      <Card>
+        <CardHeader
+          icon={<ChartPie className="size-4.5" strokeWidth={1.8} />}
+          title={`${track.name} — ข้อย่อยที่นักเรียนสนใจ`}
+        />
+        <div className="overflow-x-auto border-t border-border/60">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-muted-foreground">
+                <th className="px-4 py-2 text-left font-medium sm:px-5">ข้อย่อย</th>
+                {track.options[0]?.byRank.map((_, i) => (
+                  <th key={i} className="px-3 py-2 text-right font-medium">
+                    อันดับ {i + 1}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {[...track.options]
+                .sort((a, b) => b.byRank[0] - a.byRank[0] || b.byRank[1] - a.byRank[1])
+                .map((o) => (
+                  <tr key={o.id}>
+                    <td className="px-4 py-2 sm:px-5">{o.name}</td>
+                    {o.byRank.map((c, i) => (
+                      <td
+                        key={i}
+                        className={cn('px-3 py-2 text-right tabular-nums', i === 0 && 'font-semibold')}
+                      >
+                        {n(c)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader
+          icon={<UserX className="size-4.5" strokeWidth={1.8} />}
+          title={`${track.name} — ยังไม่จัดอันดับ ${n(track.unranked.length)} คน`}
+        />
+        {track.unranked.length ? (
+          <>
+            <div className="px-4 pb-3 sm:px-5">
+              <div className="relative">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                  strokeWidth={1.8}
+                />
+                <Input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="ค้นหาชื่อ / รหัส / ห้อง"
+                  className="h-10 pl-9"
+                />
+              </div>
+            </div>
+            {byRoom.length ? (
+              <div className="border-t border-border/60">
+                {byRoom.map(([room, list]) => (
+                  <section key={room}>
+                    <p className="bg-secondary/40 px-4 py-1.5 text-xs font-medium sm:px-5">
+                      ห้อง {room} · {n(list.length)} คน
+                    </p>
+                    <ul className="divide-y divide-border/40">
+                      {list.map((s) => (
+                        <StudentLine key={s.id} s={s} />
+                      ))}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <p className="px-4 pb-6 text-center text-sm text-muted-foreground">
+                ไม่พบนักเรียนตามคำค้น
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="px-4 pb-6 text-sm text-muted-foreground sm:px-5">
+            {track.total ? 'ทุกคนที่เลือก Track นี้จัดอันดับแล้ว' : 'ยังไม่มีนักเรียนเลือก Track นี้'}
+          </p>
+        )}
+      </Card>
+    </div>
   );
 }
 

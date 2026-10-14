@@ -1,16 +1,16 @@
 import Link from 'next/link';
-import { BookOpen, CalendarClock, ChevronRight, MapPin, Route } from 'lucide-react';
+import { BookOpen, CalendarClock, ChevronRight, ListOrdered, MapPin, Route } from 'lucide-react';
 import { requireRole } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { buildYearResults } from '@/lib/transcript';
 import { classDatesOf } from '@/lib/data';
 import { db } from '@/db';
-import { registrations, subjectSections, trackSubjects } from '@/db/schema';
+import { registrations, subjectSections, trackOptions, trackSubjects, tracks } from '@/db/schema';
 import { and, eq, isNull } from 'drizzle-orm';
 import { Card, CardHeader, Badge, EmptyState, NeedYear, resultTone } from '@/components/ui';
 import { OVERALL_LABEL, PASS_MIN_RATIO } from '@/lib/evaluate';
 import { thaiDateShort } from '@/lib/utils';
-import { choiceOf, latestTerm, termLabel } from '@/lib/tracks';
+import { choiceOf, latestTerm, ranksOf, termLabel } from '@/lib/tracks';
 
 export const metadata = { title: 'วิชาเสริมของฉัน' };
 
@@ -29,6 +29,23 @@ export default async function StudentHome() {
   // thing here that needs them to do something.
   const openTerm = await latestTerm();
   const trackChoice = openTerm ? await choiceOf(user.personId, openTerm.yearId, openTerm.semester) : null;
+
+  // อันดับข้อย่อยที่ยังค้างอยู่ — the ผู้ดูแล opened ranking on the สาย they
+  // hold and they have not ranked yet. Said here because a นักเรียน who chose
+  // weeks ago has no other reason to open the Track page again.
+  const [held] = trackChoice
+    ? await db
+        .select({ rankingOpen: tracks.rankingOpen, options: trackOptions.id })
+        .from(tracks)
+        .innerJoin(
+          trackOptions,
+          and(eq(trackOptions.trackId, tracks.id), eq(trackOptions.active, true)),
+        )
+        .where(eq(tracks.id, trackChoice.trackId))
+        .limit(1)
+    : [];
+  const rankingDue =
+    !!trackChoice && !!held?.rankingOpen && (await ranksOf(trackChoice.id)).length === 0;
 
   // Class days per section the student sits in, keyed the same way its
   // transcript line is — two รอบ of one วิชา have different days.
@@ -71,6 +88,12 @@ export default async function StudentHome() {
                 <p className="font-semibold">{trackChoice.trackName}</p>
                 {trackChoice.optionName ? (
                   <Badge tone="navy">{trackChoice.optionName}</Badge>
+                ) : null}
+                {rankingDue ? (
+                  <p className="flex w-full items-center gap-1.5 text-sm font-medium text-primary">
+                    <ListOrdered className="size-4 shrink-0" strokeWidth={1.8} />
+                    เปิดให้จัดอันดับข้อย่อยที่สนใจแล้ว — กดเพื่อจัดอันดับ
+                  </p>
                 ) : null}
               </div>
             ) : (

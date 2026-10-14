@@ -125,6 +125,14 @@ test('อันดับข้อย่อย are counted per อันดับ
       ['วาดภาพ', 0, [0, 0, 1]],
     ],
   );
+  // who has not ranked yet — the fourth one was placed, but never ranked
+  assert.equal(r.tracks[0].ranked, 3);
+  assert.equal(r.tracks[0].unranked.length, 1);
+});
+
+test('a สาย without ข้อย่อย has nobody owing a ranking', () => {
+  const r = buildTrackReport(term, [track(1, 'A')], [student({ trackId: 1, trackName: 'A' })]);
+  assert.equal(r.tracks[0].unranked.length, 0);
 });
 
 test('tracks rank by size, ties by name', () => {
