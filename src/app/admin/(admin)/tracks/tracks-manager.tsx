@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Plus, Pencil, Trash2, Route, Users, X, Layers, Repeat } from 'lucide-react';
+import { Plus, Pencil, Trash2, Route, Users, X, Layers, Repeat, ListOrdered } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Badge,
@@ -23,6 +23,7 @@ import {
   MAX_CHANGE_LIMIT,
   SEMESTERS,
   changeLimitLabel,
+  rankSlots,
   subjectInTrack,
   trackPhaseLabel,
   trackWindow,
@@ -39,12 +40,21 @@ import {
   setTermSwitch,
   toggleTrack,
   toggleTrackChanges,
+  toggleTrackRanking,
 } from './actions';
 
 /** A Track as the list shows it — the row plus how many have picked it. */
 export interface ManagerTrack extends TrackRow {
   chosenCount: number;
+  /** ผู้ถือสายนี้ที่จัดอันดับข้อย่อยแล้ว */
+  rankedCount: number;
 }
+
+const TERM_SWITCH_LABEL = {
+  choose: 'การเลือก',
+  change: 'การแก้ไข',
+  rank: 'การจัดอันดับข้อย่อย',
+} as const;
 
 /**
  * The one-line reading of a Track's ช่วงเวลา, for the list.
@@ -143,11 +153,19 @@ export function TracksManager({
     r.ok ? toast.success(r.message) : toast.error(r.message);
   }
 
-  async function switchTerm(what: 'choose' | 'change', on: boolean) {
-    const label = what === 'choose' ? 'การเลือก' : 'การแก้ไข';
+  async function toggleRanking(t: ManagerTrack) {
+    const r = await toggleTrackRanking(t.id, !t.rankingOpen);
+    r.ok ? toast.success(r.message) : toast.error(r.message);
+  }
+
+  async function switchTerm(what: keyof typeof TERM_SWITCH_LABEL, on: boolean) {
+    const label = TERM_SWITCH_LABEL[what];
+    const affected = what === 'rank' ? withOptions.length : tracks.length;
     const ok = await dialog.confirm({
       title: `${on ? 'เปิด' : 'ปิด'}${label}ทุก Track?`,
-      description: `มีผลกับทั้ง ${tracks.length} Track ของปีการศึกษา ${term.year} ภาคเรียนที่ ${term.semester}`,
+      description: `มีผลกับ ${affected} Track${
+        what === 'rank' ? 'ที่มีข้อย่อย' : ''
+      } ของปีการศึกษา ${term.year} ภาคเรียนที่ ${term.semester}`,
       ...(on ? {} : { tone: 'destructive' as const }),
     });
     if (!ok) return;
@@ -157,6 +175,8 @@ export function TracksManager({
 
   const allChoosing = tracks.length > 0 && tracks.every((t) => t.active);
   const allChanging = tracks.length > 0 && tracks.every((t) => t.changesOpen);
+  const withOptions = tracks.filter((t) => t.options.length);
+  const allRanking = withOptions.length > 0 && withOptions.every((t) => t.rankingOpen);
 
   return (
     <div className="space-y-6">
@@ -165,7 +185,7 @@ export function TracksManager({
           <h1 className="text-2xl font-semibold tracking-tight">Track</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             สายการเรียนที่นักเรียนเลือกเองได้ภาคเรียนละหนึ่งสาย และแก้ไขได้ตามจำนวนครั้งที่กำหนด —
-            บาง Track มีข้อย่อยให้เลือกต่อ
+            Track ที่มีข้อย่อย เปิดให้ผู้เลือกจัดอันดับข้อย่อยที่สนใจได้
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -225,6 +245,13 @@ export function TracksManager({
             label="การแก้ไข"
             onClick={() => switchTerm('change', !allChanging)}
           />
+          {withOptions.length ? (
+            <SwitchButton
+              on={allRanking}
+              label="การจัดอันดับข้อย่อย"
+              onClick={() => switchTerm('rank', !allRanking)}
+            />
+          ) : null}
           <p className="text-xs text-muted-foreground">
             เปิด-ปิดทุก Track พร้อมกัน — หรือสลับทีละ Track ที่รายการด้านล่าง
           </p>
@@ -295,6 +322,14 @@ export function TracksManager({
                         : 'แก้ไขเพื่อผูกกลุ่มวิชา แล้วนักเรียนจึงจะเห็นรายละเอียดวิชา'}
                     </p>
                     {t.options.length ? (
+                      <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <ListOrdered className="size-3.5 shrink-0" strokeWidth={1.8} />
+                        จัดอันดับ {rankSlots(t.options.length)} อันดับ
+                        {t.rankingRequireAll ? ' (ต้องครบ)' : ' (ไม่บังคับครบ)'} — จัดแล้ว{' '}
+                        {t.rankedCount} จาก {t.chosenCount} คน
+                      </p>
+                    ) : null}
+                    {t.options.length ? (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {t.options.map((o) => (
                           <span
@@ -321,6 +356,17 @@ export function TracksManager({
                             : undefined
                         }
                         onClick={() => toggleChanges(t)}
+                      />
+                      <SwitchButton
+                        on={t.rankingOpen}
+                        label="การจัดอันดับข้อย่อย"
+                        disabled={!t.options.length}
+                        title={
+                          t.options.length
+                            ? undefined
+                            : 'Track นี้ไม่มีข้อย่อย — เพิ่มข้อย่อยในหน้าแก้ไข'
+                        }
+                        onClick={() => toggleRanking(t)}
                       />
                     </div>
                   </div>
@@ -451,6 +497,7 @@ function TrackForm({
     toSchoolDateTimeInput(track?.closesAt ? new Date(track.closesAt) : null),
   );
   const [changeLimit, setChangeLimit] = useState(String(track?.changeLimit ?? 0));
+  const [rankingRequireAll, setRankingRequireAll] = useState(track?.rankingRequireAll ?? true);
   const [options, setOptions] = useState<DraftOption[]>(
     (track?.options ?? []).map((o) => ({
       key: `o${o.id}`,
@@ -518,6 +565,7 @@ function TrackForm({
       opensAt,
       closesAt,
       changeLimit: Number(changeLimit),
+      rankingRequireAll,
       options: options
         .filter((o) => o.name.trim())
         .map((o) => ({
@@ -766,7 +814,8 @@ function TrackForm({
             <div>
               <p className="text-sm font-medium">ข้อย่อย (ไม่บังคับ)</p>
               <p className="text-xs text-muted-foreground">
-                เช่น TrackSM มี “กฎหมาย” และ “บริหาร” — ถ้ามีข้อย่อย นักเรียนต้องเลือกหนึ่งข้อ
+                เช่น TrackSM มี “การตลาด” “ธุรกิจ” “ทำอาหาร” — นักเรียนที่เลือก Track นี้จัดอันดับข้อที่สนใจได้
+                เมื่อเปิดสวิตช์ “การจัดอันดับข้อย่อย”
               </p>
             </div>
             <Button variant="outline" size="sm" onClick={addOption} type="button">
@@ -823,6 +872,25 @@ function TrackForm({
                 </li>
               ))}
             </ul>
+          ) : null}
+
+          {options.length ? (
+            <label className="mt-3 flex items-start gap-2.5 border-t border-border/60 pt-3 text-sm">
+              <input
+                type="checkbox"
+                checked={rankingRequireAll}
+                onChange={(e) => setRankingRequireAll(e.target.checked)}
+                className="mt-0.5 size-4 accent-[var(--primary)]"
+              />
+              <span>
+                ต้องจัดให้ครบทุกอันดับ
+                <span className="block text-xs text-muted-foreground">
+                  {rankingRequireAll
+                    ? `นักเรียนต้องเรียงครบ ${rankSlots(options.length)} อันดับจึงจะบันทึกได้`
+                    : 'นักเรียนบันทึกได้ตั้งแต่จัดอันดับ 1 อันดับเดียว'}
+                </span>
+              </span>
+            </label>
           ) : null}
         </div>
       </div>

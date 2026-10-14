@@ -9,6 +9,7 @@ import {
   choiceOf,
   latestTerm,
   listTerms,
+  ranksOf,
   resolveTerm,
   tracksForTerm,
 } from '@/lib/tracks';
@@ -49,11 +50,31 @@ export default async function StudentTrackPage({
     .where(eq(people.id, user.personId))
     .limit(1);
 
-  const [available, choice, history] = await Promise.all([
-    tracksForTerm(term.yearId, term.semester, { activeOnly: true }),
+  const [all, choice, history] = await Promise.all([
+    tracksForTerm(term.yearId, term.semester),
     choiceOf(user.personId, term.yearId, term.semester),
     choiceHistoryOf(user.personId),
   ]);
+  const available = all
+    .filter((t) => t.active)
+    .map((t) => ({ ...t, options: t.options.filter((o) => o.active) }));
+
+  // อันดับข้อย่อย — read off the สาย the นักเรียน holds, which may since have
+  // been closed to new choices: ranking has a switch of its own.
+  const heldTrack = choice ? all.find((t) => t.id === choice.trackId) : undefined;
+  const heldOptions = heldTrack?.options.filter((o) => o.active) ?? [];
+  const ranked = choice && heldOptions.length ? await ranksOf(choice.id) : [];
+  const ranking =
+    heldTrack && heldOptions.length && (heldTrack.rankingOpen || ranked.length)
+      ? {
+          trackName: heldTrack.name,
+          options: heldOptions.map((o) => ({ id: o.id, name: o.name, description: o.description })),
+          // Only the open term's ranking can be changed; an old one is history.
+          open: heldTrack.rankingOpen && isOpenTerm,
+          requireAll: heldTrack.rankingRequireAll,
+          ranked,
+        }
+      : null;
 
   // The held สาย is read on its own rather than out of `available`: it may
   // since have been closed to new choices, and its limit still governs.
@@ -130,11 +151,11 @@ export default async function StudentTrackPage({
         isOpenTerm={isOpenTerm}
         gradeLevel={gradeLevel}
         tracks={offered}
+        ranking={ranking}
         choice={
           choice
             ? {
                 trackId: choice.trackId,
-                optionId: choice.optionId,
                 trackName: choice.trackName,
                 groupColor: choice.groupColor,
                 optionName: choice.optionName,

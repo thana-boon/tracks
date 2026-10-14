@@ -24,6 +24,8 @@ function track(id: number, name: string, options: string[] = [], active = true):
     active,
     changeLimit: 0,
     changesOpen: true,
+    rankingOpen: false,
+    rankingRequireAll: true,
     options: options.map((o, i) => ({
       id: id * 100 + i,
       groupId: null,
@@ -53,6 +55,7 @@ function student(p: Partial<ReportStudent> = {}): ReportStudent {
     trackName: null,
     optionId: null,
     optionName: null,
+    ranked: [],
     byAdmin: false,
     ...p,
   };
@@ -100,6 +103,26 @@ test('ข้อย่อย are counted under their own สาย', () => {
     [
       ['กฎหมาย', 2],
       ['บริหาร', 1],
+    ],
+  );
+});
+
+test('อันดับข้อย่อย are counted per อันดับ, apart from who was placed', () => {
+  const sm = track(1, 'TrackSM', ['การตลาด', 'ธุรกิจ', 'ทำอาหาร', 'วาดภาพ']);
+  const [mkt, biz, cook, art] = sm.options.map((o) => o.id);
+  const r = buildTrackReport(term, [sm], [
+    student({ trackId: 1, trackName: 'TrackSM', ranked: [mkt, biz, cook] }),
+    student({ trackId: 1, trackName: 'TrackSM', ranked: [biz, mkt, art] }),
+    student({ trackId: 1, trackName: 'TrackSM', ranked: [mkt] }),
+    student({ trackId: 1, trackName: 'TrackSM', optionId: cook, optionName: 'ทำอาหาร' }),
+  ]);
+  assert.deepEqual(
+    r.tracks[0].options.map((o) => [o.name, o.count, o.byRank]),
+    [
+      ['การตลาด', 0, [2, 1, 0]],
+      ['ธุรกิจ', 0, [1, 1, 0]],
+      ['ทำอาหาร', 1, [0, 0, 1]],
+      ['วาดภาพ', 0, [0, 0, 1]],
     ],
   );
 });

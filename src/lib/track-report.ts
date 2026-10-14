@@ -9,7 +9,7 @@
  * function rather than out of two that have to be kept agreeing.
  */
 import type { Sheet } from './xlsx';
-import type { Term, TrackRow } from './track-core';
+import { RANK_COUNT, type Term, type TrackRow } from './track-core';
 
 export interface ReportStudent {
   id: number;
@@ -23,6 +23,8 @@ export interface ReportStudent {
   trackName: string | null;
   optionId: number | null;
   optionName: string | null;
+  /** อันดับข้อย่อยที่นักเรียนจัดเอง — option ids, อันดับ 1 first */
+  ranked: number[];
   /** an admin set or moved this choice — an exception, and shown as one */
   byAdmin: boolean;
 }
@@ -30,7 +32,10 @@ export interface ReportStudent {
 export interface OptionTally {
   id: number;
   name: string;
+  /** ผู้ที่ผู้ดูแลจัดให้ได้ข้อย่อยนี้ */
   count: number;
+  /** ผู้ที่จัดข้อย่อยนี้เป็นอันดับ 1, 2, 3 — index 0 is อันดับ 1 */
+  byRank: number[];
 }
 
 export interface TrackTally {
@@ -118,7 +123,12 @@ export function buildTrackReport(
         active: t.active,
         gradeLevels: t.gradeLevels,
         total: 0,
-        options: t.options.map((o) => ({ id: o.id, name: o.name, count: 0 })),
+        options: t.options.map((o) => ({
+          id: o.id,
+          name: o.name,
+          count: 0,
+          byRank: Array<number>(RANK_COUNT).fill(0),
+        })),
         byGrade: [],
         students: [],
       },
@@ -162,6 +172,10 @@ export function buildTrackReport(
       const opt = tally.options.find((o) => o.id === s.optionId);
       if (opt) opt.count++;
     }
+    s.ranked.forEach((id, i) => {
+      const opt = tally.options.find((o) => o.id === id);
+      if (opt && i < RANK_COUNT) opt.byRank[i]++;
+    });
     const grade = s.gradeLevel ?? '—';
     const grades = gradeCounts.get(tally.id) ?? new Map<string, number>();
     grades.set(grade, (grades.get(grade) ?? 0) + 1);
@@ -236,23 +250,37 @@ function personCells(s: ReportStudent) {
  */
 export function reportSheets(report: TrackReport): Sheet[] {
   const { tracks, rooms, totals } = report;
+  const optionName = new Map(tracks.flatMap((t) => t.options.map((o) => [o.id, o.name] as const)));
+  const rankHeader = Array.from({ length: RANK_COUNT }, (_, i) => `สนใจอันดับ ${i + 1}`);
+  const rankWidths = rankHeader.map(() => 18);
+  const rankCells = (s: ReportStudent) =>
+    rankHeader.map((_, i) => (s.ranked[i] ? (optionName.get(s.ranked[i]) ?? '') : ''));
 
   const everyone: Sheet = {
     name: 'รายบุคคล',
-    header: [...PERSON_HEADER, 'Track', 'ข้อย่อย', 'สถานะ'],
-    widths: [...PERSON_WIDTHS, 24, 20, 14],
+    header: [...PERSON_HEADER, 'Track', 'ข้อย่อย', ...rankHeader, 'สถานะ'],
+    widths: [...PERSON_WIDTHS, 24, 20, ...rankWidths, 14],
     rows: report.students.map((s) => [
       ...personCells(s),
       s.trackName ?? '',
       s.optionName ?? '',
+      ...rankCells(s),
       s.trackName ? (s.byAdmin ? 'ผู้ดูแลกำหนด' : 'เลือกเอง') : 'ยังไม่เลือก',
     ]),
   };
 
   const counts: Sheet = {
     name: 'สรุปจำนวนแต่ละ Track',
-    header: ['Track', 'ข้อย่อย', 'จำนวน (คน)', 'สัดส่วนผู้เลือก', 'ระดับชั้นที่เลือก', 'สถานะ'],
-    widths: [24, 20, 14, 16, 26, 14],
+    header: [
+      'Track',
+      'ข้อย่อย',
+      'จำนวน (คน)',
+      'สัดส่วนผู้เลือก',
+      'ระดับชั้นที่เลือก',
+      'สถานะ',
+      ...rankHeader,
+    ],
+    widths: [24, 20, 14, 16, 26, 14, ...rankWidths],
     rows: [],
   };
   for (const t of tracks) {
@@ -267,7 +295,9 @@ export function reportSheets(report: TrackReport): Sheet[] {
     ]);
     // ข้อย่อย indented under their สาย rather than given their own sheet: the
     // แขนง only means anything next to the สาย it splits.
-    for (const o of t.options) counts.rows.push(['', o.name, o.count, '', '', '']);
+    // The อันดับ columns count who *asked* for the ข้อย่อย; จำนวน counts who
+    // the ผู้ดูแล has placed in it.
+    for (const o of t.options) counts.rows.push(['', o.name, o.count, '', '', '', ...o.byRank]);
   }
   counts.rows.push([]);
   counts.rows.push(['รวมนักเรียนทั้งหมด', '', totals.students, '', '', '']);
@@ -298,11 +328,12 @@ export function reportSheets(report: TrackReport): Sheet[] {
 
   const rosters: Sheet[] = tracks.map((t) => ({
     name: t.name,
-    header: [...PERSON_HEADER, 'ข้อย่อย', 'สถานะ'],
-    widths: [...PERSON_WIDTHS, 20, 14],
+    header: [...PERSON_HEADER, 'ข้อย่อย', ...(t.options.length ? rankHeader : []), 'สถานะ'],
+    widths: [...PERSON_WIDTHS, 20, ...(t.options.length ? rankWidths : []), 14],
     rows: t.students.map((s) => [
       ...personCells(s),
       s.optionName ?? '',
+      ...(t.options.length ? rankCells(s) : []),
       s.byAdmin ? 'ผู้ดูแลกำหนด' : 'เลือกเอง',
     ]),
   }));

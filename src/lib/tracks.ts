@@ -6,6 +6,7 @@ import {
   people,
   trackChoices,
   trackGroups,
+  trackOptionRanks,
   trackOptions,
   trackSubjects,
   tracks,
@@ -108,6 +109,8 @@ export async function tracksForTerm(
       active: tracks.active,
       changeLimit: tracks.changeLimit,
       changesOpen: tracks.changesOpen,
+      rankingOpen: tracks.rankingOpen,
+      rankingRequireAll: tracks.rankingRequireAll,
     })
     .from(tracks)
     .leftJoin(trackGroups, eq(tracks.groupId, trackGroups.id))
@@ -210,6 +213,8 @@ export async function tracksForTerm(
     active: t.active,
     changeLimit: t.changeLimit,
     changesOpen: t.changesOpen,
+    rankingOpen: t.rankingOpen,
+    rankingRequireAll: t.rankingRequireAll,
     options: byTrack.get(t.id) ?? [],
     subjects: subjectsOf(t.groupId, t),
   }));
@@ -354,38 +359,87 @@ export async function choiceCountsForTerm(
   return counts;
 }
 
+/** How many holders of each track have ranked its ข้อย่อย — for the admin list. */
+export async function rankedCountsForTerm(
+  yearId: number,
+  semester: number,
+): Promise<Map<number, number>> {
+  const rows = await db
+    .selectDistinct({ trackId: trackChoices.trackId, choiceId: trackOptionRanks.choiceId })
+    .from(trackOptionRanks)
+    .innerJoin(trackChoices, eq(trackOptionRanks.choiceId, trackChoices.id))
+    .where(and(eq(trackChoices.yearId, yearId), eq(trackChoices.semester, semester)));
+  const counts = new Map<number, number>();
+  for (const r of rows) counts.set(r.trackId, (counts.get(r.trackId) ?? 0) + 1);
+  return counts;
+}
+
 /**
- * Whether a ข้อย่อย fits the track: required when the track has any, absent
- * when it has none, and always one of *this* track's. Returns the reason it
- * does not, or null.
+ * Whether a ข้อย่อย fits the track: optional — นักเรียน rank the ข้อย่อย they
+ * are interested in rather than pick one when choosing the สาย, and the
+ * ผู้ดูแล sets the one they get later — but when given, it is always one of
+ * *this* track's. Returns the reason it does not fit, or null.
  *
  * Lives here rather than beside either caller because the นักเรียน screen and
- * the ผู้ดูแล screen have to apply the identical rule — a สาย that demands a
- * แขนง from one of them and not the other is a half-made choice in the table.
+ * the ผู้ดูแล screen have to apply the identical rule.
  */
 export async function optionProblem(
   track: { id: number; name: string },
   optionId: number | null,
 ): Promise<string | null> {
-  const opts = await db
+  if (!optionId) return null;
+  const [opt] = await db
     .select({ id: trackOptions.id })
     .from(trackOptions)
-    .where(eq(trackOptions.trackId, track.id));
-  if (!opts.length) return optionId ? `“${track.name}” ไม่มีข้อย่อยให้เลือก` : null;
-  if (!optionId) return `เลือกข้อย่อยของ “${track.name}” ด้วย`;
-  return opts.some((o) => o.id === optionId) ? null : 'ไม่พบข้อย่อยนี้ใน Track ที่เลือก';
+    .where(and(eq(trackOptions.id, optionId), eq(trackOptions.trackId, track.id)))
+    .limit(1);
+  return opt ? null : 'ไม่พบข้อย่อยนี้ใน Track ที่เลือก';
+}
+
+/** อันดับข้อย่อยของการเลือกหนึ่งรายการ — option ids, อันดับ 1 first. */
+export async function ranksOf(choiceId: number): Promise<number[]> {
+  const rows = await db
+    .select({ optionId: trackOptionRanks.optionId })
+    .from(trackOptionRanks)
+    .where(eq(trackOptionRanks.choiceId, choiceId))
+    .orderBy(asc(trackOptionRanks.rank));
+  return rows.map((r) => r.optionId);
 }
 
 /**
- * Everything the รายงานสรุป of one ภาคเรียน needs, in two queries.
+ * อันดับข้อย่อยของทุกคนในภาคเรียนหนึ่ง, by student — option ids, อันดับ 1
+ * first. One query for the whole term: the ผู้ดูแล screens list every นักเรียน.
+ */
+export async function ranksForTerm(
+  yearId: number,
+  semester: number,
+): Promise<Map<number, number[]>> {
+  const rows = await db
+    .select({ studentId: trackChoices.studentId, optionId: trackOptionRanks.optionId })
+    .from(trackOptionRanks)
+    .innerJoin(trackChoices, eq(trackOptionRanks.choiceId, trackChoices.id))
+    .where(and(eq(trackChoices.yearId, yearId), eq(trackChoices.semester, semester)))
+    .orderBy(asc(trackChoices.studentId), asc(trackOptionRanks.rank));
+  const by = new Map<number, number[]>();
+  for (const r of rows) {
+    const list = by.get(r.studentId) ?? [];
+    list.push(r.optionId);
+    by.set(r.studentId, list);
+  }
+  return by;
+}
+
+/**
+ * Everything the รายงานสรุป of one ภาคเรียน needs, in three queries.
  *
  * Every studying นักเรียน is in the list, not only those who chose — "ใครยัง
  * ไม่เลือก" is one of the four questions the report exists to answer, and a
  * left join is the only shape that can answer it.
  */
 export async function trackReportFor(term: Term): Promise<TrackReport> {
-  const [defined, rows] = await Promise.all([
+  const [defined, ranks, rows] = await Promise.all([
     tracksForTerm(term.yearId, term.semester),
+    ranksForTerm(term.yearId, term.semester),
     db
       .select({
         id: people.id,
@@ -419,6 +473,7 @@ export async function trackReportFor(term: Term): Promise<TrackReport> {
 
   const students: ReportStudent[] = rows.map(({ chosenBy, changedBy, ...s }) => ({
     ...s,
+    ranked: ranks.get(s.id) ?? [],
     byAdmin: chosenBy !== null && choiceByAdmin(chosenBy, changedBy),
   }));
   return buildTrackReport(term, defined, students);

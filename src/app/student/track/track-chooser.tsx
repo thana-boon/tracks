@@ -9,6 +9,7 @@ import {
   GraduationCap,
   History,
   Info,
+  ListOrdered,
   Lock,
   Repeat,
   Route,
@@ -25,6 +26,9 @@ import {
   countdownParts,
   countdownText,
   countdownUrgency,
+  rankSlots,
+  rankingProblem,
+  rankingRuleLabel,
   termLabel,
   trackPhaseLabel,
   trackWindow,
@@ -35,11 +39,10 @@ import {
   type TrackWindow,
 } from '@/lib/track-core';
 import { cn, thaiDateTimeLongOf } from '@/lib/utils';
-import { chooseTrack } from './actions';
+import { chooseTrack, rankOptions } from './actions';
 
 export interface MyChoice {
   trackId: number;
-  optionId: number | null;
   trackName: string;
   groupColor: string | null;
   optionName: string | null;
@@ -49,6 +52,17 @@ export interface MyChoice {
   change: ChangeStanding | null;
   /** the held สาย's ปิดรับ — the deadline for changing, counted down on the card */
   changeClosesAt: string | null;
+}
+
+/** อันดับข้อย่อยของสายที่ถืออยู่ — null when the สาย has none, or ranking never opened */
+export interface MyRanking {
+  trackName: string;
+  options: { id: number; name: string; description: string | null }[];
+  /** the ผู้ดูแล's switch, in the open term only */
+  open: boolean;
+  requireAll: boolean;
+  /** option ids, อันดับ 1 first */
+  ranked: number[];
 }
 
 export interface HistoryRow {
@@ -279,6 +293,7 @@ export function TrackChooser({
   isOpenTerm,
   gradeLevel,
   tracks,
+  ranking,
   choice,
   history,
 }: {
@@ -290,13 +305,13 @@ export function TrackChooser({
   isOpenTerm: boolean;
   gradeLevel: string | null;
   tracks: TrackRow[];
+  ranking: MyRanking | null;
   choice: MyChoice | null;
   history: HistoryRow[];
 }) {
   const router = useRouter();
   const dialog = useDialog();
   const [trackId, setTrackId] = useState<number | null>(null);
-  const [optionId, setOptionId] = useState<number | null>(null);
   const [detail, setDetail] = useState<TrackRow | null>(null);
   const [saving, setSaving] = useState(false);
   /** the list reopened over an existing choice, to change it */
@@ -304,8 +319,7 @@ export function TrackChooser({
 
   const selected = tracks.find((t) => t.id === trackId) ?? null;
   const canChange = !!choice?.change && choice.change.blocked === null;
-  const unchanged =
-    !!choice && selected?.id === choice.trackId && (optionId ?? null) === choice.optionId;
+  const unchanged = !!choice && selected?.id === choice.trackId;
 
   // Every instant at which something on this page changes state.
   const boundaries = [
@@ -367,22 +381,15 @@ export function TrackChooser({
   function startChange() {
     if (!choice) return;
     setTrackId(choice.trackId);
-    setOptionId(choice.optionId);
     setChanging(true);
   }
 
   async function submit() {
     if (saving || !selected || !selectedOpen || unchanged) return;
-    if (selected.options.length && !optionId) {
-      toast.error(`เลือกข้อย่อยของ “${selected.name}” ด้วย`);
-      return;
-    }
-    // The last stop before the choice counts — said plainly, with the สาย, the
-    // แขนง and how many changes will be left, because that is the sentence
-    // they have to agree with.
-    const option = optionId
-      ? `ข้อย่อย: ${selected.options.find((o) => o.id === optionId)?.name} · `
-      : '';
+    // The last stop before the choice counts — said plainly, with the สาย and
+    // how many changes will be left, because that is the sentence they have
+    // to agree with. Leaving a สาย also leaves its อันดับข้อย่อย behind.
+    const option = choice && ranking?.ranked.length ? 'อันดับข้อย่อยที่จัดไว้จะถูกล้าง · ' : '';
     const left = choice?.change ? choice.change.left - 1 : 0;
     const ok = await dialog.confirm(
       choice
@@ -410,14 +417,12 @@ export function TrackChooser({
       yearId: term.yearId,
       semester: term.semester,
       trackId: selected.id,
-      optionId: selected.options.length ? optionId : null,
     });
     setSaving(false);
     if (r.ok) {
       toast.success(r.message);
       setChanging(false);
       setTrackId(null);
-      setOptionId(null);
       router.refresh();
     } else {
       toast.error(r.message);
@@ -507,6 +512,8 @@ export function TrackChooser({
         </Card>
       ) : null}
 
+      {choice && ranking && !changing ? <RankingCard term={term} ranking={ranking} /> : null}
+
       {choice && !changing ? null : !isOpenTerm ? (
         <EmptyState
           icon={<History className="size-8" strokeWidth={1.5} />}
@@ -545,10 +552,7 @@ export function TrackChooser({
                     <button
                       type="button"
                       disabled={shut}
-                      onClick={() => {
-                        setTrackId(t.id);
-                        if (t.id !== trackId) setOptionId(null);
-                      }}
+                      onClick={() => setTrackId(t.id)}
                       className={cn(
                         'w-full rounded-xl border px-4 py-3.5 text-left transition',
                         shut
@@ -620,34 +624,6 @@ export function TrackChooser({
                       </button>
                     </div>
 
-                    {on && !shut && t.options.length ? (
-                      <ul className="mt-2 space-y-2 pl-4">
-                        {t.options.map((o) => {
-                          const picked = o.id === optionId;
-                          return (
-                            <li key={o.id}>
-                              <button
-                                type="button"
-                                onClick={() => setOptionId(o.id)}
-                                className={cn(
-                                  'w-full rounded-lg border px-3.5 py-2.5 text-left text-sm transition-colors',
-                                  picked
-                                    ? 'border-primary bg-primary/5 font-medium'
-                                    : 'border-border hover:bg-secondary/50',
-                                )}
-                              >
-                                {o.name}
-                                {o.description ? (
-                                  <span className="block text-xs font-normal text-muted-foreground">
-                                    {o.description}
-                                  </span>
-                                ) : null}
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : null}
                   </li>
                 );
               })}
@@ -669,7 +645,6 @@ export function TrackChooser({
                     onClick={() => {
                       setChanging(false);
                       setTrackId(null);
-                      setOptionId(null);
                     }}
                     disabled={saving}
                   >
@@ -707,6 +682,142 @@ export function TrackChooser({
         </Card>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * จัดอันดับข้อย่อยที่สนใจ — under the held สาย, for its holder only.
+ *
+ * Tap to rank rather than a dropdown per อันดับ: the first tap is อันดับ 1, the
+ * next อันดับ 2, and tapping a ranked one takes it out and closes the gap — no
+ * state in which the same ข้อย่อย sits in two boxes. Read-only once the
+ * ผู้ดูแล closes ranking, so what they will use is what the นักเรียน sees.
+ */
+function RankingCard({ term, ranking }: { term: Term; ranking: MyRanking }) {
+  const router = useRouter();
+  const [ranked, setRanked] = useState<number[]>(ranking.ranked);
+  const [saving, setSaving] = useState(false);
+
+  const slots = rankSlots(ranking.options.length);
+  const optionIds = ranking.options.map((o) => o.id);
+  const problem = rankingProblem(ranked, optionIds, ranking.requireAll);
+  const saved = ranked.length === ranking.ranked.length && ranked.every((id, i) => id === ranking.ranked[i]);
+  const nameOf = (id: number) => ranking.options.find((o) => o.id === id)?.name ?? '';
+
+  function tap(id: number) {
+    if (!ranking.open) return;
+    setRanked((cur) =>
+      cur.includes(id) ? cur.filter((x) => x !== id) : cur.length < slots ? [...cur, id] : cur,
+    );
+  }
+
+  async function save() {
+    if (saving || problem || saved) return;
+    setSaving(true);
+    const r = await rankOptions({ yearId: term.yearId, semester: term.semester, ranked });
+    setSaving(false);
+    if (r.ok) {
+      toast.success(r.message);
+      router.refresh();
+    } else {
+      toast.error(r.message);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        icon={<ListOrdered className="size-4.5" strokeWidth={1.8} />}
+        title={`จัดอันดับข้อย่อยที่สนใจ — ${ranking.trackName}`}
+      />
+      <div className="space-y-3 px-4 pb-4 sm:px-5">
+        <p className="text-sm text-muted-foreground">
+          {ranking.open
+            ? `${rankingRuleLabel(slots, ranking.requireAll)} · แตะเพื่อเรียงอันดับ แตะซ้ำเพื่อนำออก`
+            : 'ปิดการจัดอันดับแล้ว — อันดับด้านล่างคือที่บันทึกไว้'}
+        </p>
+
+        <ol className="grid gap-2 sm:grid-cols-3">
+          {Array.from({ length: slots }, (_, i) => (
+            <li
+              key={i}
+              className={cn(
+                'flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm',
+                ranked[i] ? 'border-primary bg-primary/5' : 'border-dashed border-border',
+              )}
+            >
+              <span
+                className={cn(
+                  'grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold',
+                  ranked[i] ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground',
+                )}
+              >
+                {i + 1}
+              </span>
+              <span className={cn('min-w-0 truncate', ranked[i] ? 'font-medium' : 'text-muted-foreground')}>
+                {ranked[i] ? nameOf(ranked[i]) : ranking.requireAll || i === 0 ? 'ยังไม่ได้เลือก' : 'ไม่บังคับ'}
+              </span>
+            </li>
+          ))}
+        </ol>
+
+        {ranking.open ? (
+          <>
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {ranking.options.map((o) => {
+                const at = ranked.indexOf(o.id);
+                const full = at < 0 && ranked.length >= slots;
+                return (
+                  <li key={o.id}>
+                    <button
+                      type="button"
+                      onClick={() => tap(o.id)}
+                      disabled={full}
+                      aria-pressed={at >= 0}
+                      className={cn(
+                        'flex w-full items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-left text-sm transition-colors',
+                        at >= 0
+                          ? 'border-primary bg-primary/5 font-medium'
+                          : full
+                            ? 'cursor-not-allowed border-border opacity-50'
+                            : 'border-border hover:bg-secondary/50',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'grid size-6 shrink-0 place-items-center rounded-full border text-xs font-bold',
+                          at >= 0 ? 'border-primary bg-primary text-primary-foreground' : 'border-border',
+                        )}
+                      >
+                        {at >= 0 ? at + 1 : ''}
+                      </span>
+                      <span className="min-w-0">
+                        {o.name}
+                        {o.description ? (
+                          <span className="block text-xs font-normal text-muted-foreground">
+                            {o.description}
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3.5">
+              <p className="text-xs text-muted-foreground">
+                {saved && ranking.ranked.length
+                  ? 'บันทึกแล้ว — แก้ได้จนกว่าผู้ดูแลจะปิดการจัดอันดับ'
+                  : (problem ?? 'พร้อมบันทึก')}
+              </p>
+              <Button onClick={save} disabled={saving || !!problem || saved}>
+                บันทึกอันดับ
+              </Button>
+            </div>
+          </>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 
@@ -763,7 +874,7 @@ function TrackDetail({ track, onClose }: { track: TrackRow; onClose: () => void 
           <section>
             <p className="flex items-center gap-1.5 text-sm font-medium">
               <Route className="size-4" strokeWidth={1.8} />
-              ข้อย่อยที่เลือกได้ — เลือกได้หนึ่งข้อ
+              ข้อย่อยใน Track นี้ — เลือก Track แล้วจะได้จัดอันดับข้อที่สนใจ
             </p>
             <ul className="mt-2 space-y-2.5">
               {track.options.map((o) => (

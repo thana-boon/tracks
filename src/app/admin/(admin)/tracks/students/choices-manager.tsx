@@ -29,7 +29,10 @@ export interface ChoiceStudent {
   classroom: string | null;
   classNumber: number | null;
   trackId: number | null;
+  /** ข้อย่อยที่ผู้ดูแลจัดให้ */
   optionId: number | null;
+  /** อันดับข้อย่อยที่นักเรียนจัดเอง — option ids, อันดับ 1 first */
+  ranked: number[];
   byAdmin: boolean;
   /** ครั้งที่นักเรียนเปลี่ยนเองไปแล้วในภาคเรียนนี้ */
   studentChanges: number;
@@ -233,6 +236,9 @@ export function ChoicesManager({
               {shown.map((s) => {
                 const track = s.trackId ? trackById.get(s.trackId) : null;
                 const option = track?.options.find((o) => o.id === s.optionId) ?? null;
+                const rankNames = s.ranked.map(
+                  (id, i) => `${i + 1}. ${track?.options.find((o) => o.id === id)?.name ?? '?'}`,
+                );
                 return (
                   <li key={s.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
                     <span className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
@@ -257,6 +263,13 @@ export function ChoicesManager({
                           {s.byAdmin ? <Badge tone="accent">ผู้ดูแลกำหนด</Badge> : null}
                           {s.studentChanges ? (
                             <Badge tone="secondary">แก้เอง {s.studentChanges} ครั้ง</Badge>
+                          ) : null}
+                          {track.options.length ? (
+                            <span className="w-full text-xs text-muted-foreground">
+                              {rankNames.length
+                                ? `อันดับที่สนใจ: ${rankNames.join(' · ')}`
+                                : 'ยังไม่จัดอันดับข้อย่อย'}
+                            </span>
                           ) : null}
                         </>
                       ) : (
@@ -418,19 +431,30 @@ function AssignForm({
 
         {selected?.options.length ? (
           <div>
-            <Label htmlFor="a-option">ข้อย่อยของ “{selected.name}”</Label>
+            <Label htmlFor="a-option">ข้อย่อยที่ได้ของ “{selected.name}” (ไม่บังคับ)</Label>
             <Select
               id="a-option"
               value={optionId ?? ''}
               onChange={(e) => setOptionId(Number(e.target.value) || null)}
             >
-              <option value="">— เลือกข้อย่อย —</option>
-              {selected.options.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
+              <option value="">— ยังไม่กำหนด —</option>
+              {selected.options.map((o) => {
+                // The นักเรียน's own อันดับ beside each one, so the ผู้ดูแล
+                // places them knowing what they asked for.
+                const at = selected.id === student.trackId ? student.ranked.indexOf(o.id) : -1;
+                return (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                    {at >= 0 ? ` (นักเรียนจัดเป็นอันดับ ${at + 1})` : ''}
+                  </option>
+                );
+              })}
             </Select>
+            {selected.id === student.trackId ? null : (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                ย้าย Track แล้ว อันดับข้อย่อยที่นักเรียนจัดไว้ใน Track เดิมจะถูกล้าง
+              </p>
+            )}
           </div>
         ) : null}
       </div>

@@ -234,6 +234,16 @@ function TrackTab({ report }: { report: TrackReport }) {
                       ))}
                     </p>
                   ) : null}
+                  {t.options.some((o) => o.byRank.some(Boolean)) ? (
+                    <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">สนใจ (อันดับ 1/2/3)</span>
+                      {t.options.map((o) => (
+                        <span key={o.id}>
+                          {o.name} {o.byRank.map(n).join('/')}
+                        </span>
+                      ))}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="text-lg font-semibold tabular-nums">{n(t.total)}</p>

@@ -7,6 +7,8 @@ import {
   countdownParts,
   countdownText,
   countdownUrgency,
+  rankSlots,
+  rankingProblem,
 } from './track-core';
 import { fromSchoolDateTimeInput } from './utils';
 
@@ -73,4 +75,29 @@ test('countdown urgency', () => {
   assert.equal(countdownUrgency(25 * 3_600_000), 'calm');
   assert.equal(countdownUrgency(23 * 3_600_000), 'soon');
   assert.equal(countdownUrgency(59 * 60_000), 'urgent');
+});
+
+test('อันดับข้อย่อย: three slots, fewer when there are fewer ข้อย่อย', () => {
+  assert.equal(rankSlots(5), 3);
+  assert.equal(rankSlots(2), 2);
+  assert.equal(rankSlots(0), 0);
+});
+
+test('อันดับข้อย่อย: ครบ or not, as the ผู้ดูแล set it', () => {
+  const opts = [11, 12, 13, 14, 15];
+  assert.equal(rankingProblem([11, 12, 13], opts, true), null);
+  assert.equal(rankingProblem([11, 12], opts, true), 'จัดให้ครบทั้ง 3 อันดับ');
+  assert.equal(rankingProblem([11, 12], opts, false), null);
+  assert.equal(rankingProblem([11], opts, false), null);
+  assert.equal(rankingProblem([], opts, false), 'เลือกข้อย่อยอันดับ 1 ก่อน');
+  // two ข้อย่อย ask for two, even when ครบ is required
+  assert.equal(rankingProblem([11, 12], [11, 12], true), null);
+});
+
+test('อันดับข้อย่อย: no repeats, no strangers, no extras', () => {
+  const opts = [11, 12, 13, 14];
+  assert.equal(rankingProblem([11, 11, 12], opts, true), 'เลือกข้อย่อยซ้ำกันไม่ได้');
+  assert.equal(rankingProblem([11, 12, 99], opts, true), 'ไม่พบข้อย่อยนี้ใน Track ที่เลือก');
+  assert.equal(rankingProblem([11, 12, 13, 14], opts, true), 'จัดได้ไม่เกิน 3 อันดับ');
+  assert.equal(rankingProblem([11], [], false), 'Track นี้ไม่มีข้อย่อยให้จัดอันดับ');
 });

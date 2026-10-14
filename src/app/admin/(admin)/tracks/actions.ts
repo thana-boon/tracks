@@ -9,6 +9,7 @@ import {
   people,
   trackChoices,
   trackGroups,
+  trackOptionRanks,
   trackOptions,
   trackSubjects,
   tracks,
@@ -59,6 +60,8 @@ const TrackInput = z.object({
     .max(MAX_CHANGE_LIMIT, `แก้ไขได้ไม่เกิน ${MAX_CHANGE_LIMIT} ครั้ง`)
     .optional()
     .default(0),
+  /** ต้องจัดอันดับข้อย่อยให้ครบทุกอันดับ — false lets a นักเรียน stop at อันดับ 1 */
+  rankingRequireAll: z.boolean().optional().default(true),
   options: z.array(OptionInput).max(30),
 });
 
@@ -89,6 +92,7 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
     admissionNote,
     gradeLevels,
     changeLimit,
+    rankingRequireAll,
     options,
   } = parsed.data;
 
@@ -191,6 +195,7 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
             opensAt,
             closesAt,
             changeLimit,
+            rankingRequireAll,
           })
           .where(eq(tracks.id, trackId));
       } else {
@@ -208,6 +213,7 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
             opensAt,
             closesAt,
             changeLimit,
+            rankingRequireAll,
           })
           .returning({ id: tracks.id });
         trackId = created.id;
@@ -230,6 +236,14 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
           .from(trackChoices)
           .where(inArray(trackChoices.optionId, drop));
         if (Number(n) > 0) throw new ChoiceInUse(`ลบข้อย่อยไม่ได้: มีนักเรียนเลือกไว้แล้ว ${n} คน`);
+        // Nor one somebody has ranked: their อันดับ would close up around a
+        // hole, and อันดับ 2 would silently become อันดับ 1.
+        const [{ r } = { r: 0 }] = await tx
+          .select({ r: sql<number>`count(distinct ${trackOptionRanks.choiceId})` })
+          .from(trackOptionRanks)
+          .where(inArray(trackOptionRanks.optionId, drop));
+        if (Number(r) > 0)
+          throw new ChoiceInUse(`ลบข้อย่อยไม่ได้: มีนักเรียนจัดอันดับไว้แล้ว ${r} คน`);
         await tx.delete(trackOptions).where(inArray(trackOptions.id, drop));
         removed = drop.length;
       }
@@ -271,6 +285,7 @@ export async function saveTrack(id: number | null, form: TrackInputForm): Promis
     opensAt: opensAt?.toISOString(),
     closesAt: closesAt?.toISOString(),
     changeLimit,
+    rankingRequireAll,
     options: options.length,
     removedOptions: removed,
   });
@@ -344,16 +359,44 @@ export async function toggleTrackChanges(id: number, open: boolean): Promise<Act
   };
 }
 
+/**
+ * เปิด-ปิดให้นักเรียนจัดอันดับข้อย่อยของ Track นี้ — its own switch: the
+ * ranking usually opens after the สาย is settled, and closing it must not
+ * touch who may choose or change the สาย itself.
+ */
+export async function toggleTrackRanking(id: number, open: boolean): Promise<ActionResult> {
+  const user = await requireRole('admin');
+  const [{ n } = { n: 0 }] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(trackOptions)
+    .where(eq(trackOptions.trackId, id));
+  if (open && Number(n) === 0)
+    return { ok: false, message: 'Track นี้ยังไม่มีข้อย่อย — เพิ่มข้อย่อยในหน้าแก้ไขก่อน' };
+  await db.update(tracks).set({ rankingOpen: open }).where(eq(tracks.id, id));
+  await logActivity(user, open ? 'open_track_ranking' : 'close_track_ranking', `track:${id}`);
+  revalidatePath('/admin/tracks');
+  revalidatePath('/student/track');
+  return {
+    ok: true,
+    message: open
+      ? 'เปิดให้จัดอันดับข้อย่อยแล้ว — เฉพาะนักเรียนที่เลือก Track นี้'
+      : 'ปิดการจัดอันดับข้อย่อยแล้ว — อันดับที่จัดไว้ยังอยู่ครบ',
+  };
+}
+
 const TermSwitchInput = z.object({
   yearId: z.number().int().positive(),
   semester: z.number().int().refine((n) => SEMESTERS.includes(n as 1 | 2), 'ภาคเรียนไม่ถูกต้อง'),
-  /** 'choose' is การเลือก (`active`), 'change' is การแก้ไข (`changesOpen`) */
-  what: z.enum(['choose', 'change']),
+  /**
+   * 'choose' is การเลือก (`active`), 'change' is การแก้ไข (`changesOpen`),
+   * 'rank' is การจัดอันดับข้อย่อย (`rankingOpen`)
+   */
+  what: z.enum(['choose', 'change', 'rank']),
   on: z.boolean(),
 });
 
 /**
- * Both switches, for every Track of one ภาคเรียน at once — the shape the
+ * One switch, for every Track of one ภาคเรียน at once — the shape the
  * decision usually takes ("ปิดรับทั้งหมดวันนี้"), and one click rather than
  * one per สาย that a busy ผู้ดูแล could miss one of.
  */
@@ -364,10 +407,20 @@ export async function setTermSwitch(form: z.infer<typeof TermSwitchInput>): Prom
     return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
   const { yearId, semester, what, on } = parsed.data;
 
+  // การจัดอันดับ only means something on a สาย that has ข้อย่อย, so turning
+  // it on skips the ones without — they would show "เปิด" over nothing.
   const changed = await db
     .update(tracks)
-    .set(what === 'choose' ? { active: on } : { changesOpen: on })
-    .where(and(eq(tracks.yearId, yearId), eq(tracks.semester, semester)))
+    .set(what === 'choose' ? { active: on } : what === 'change' ? { changesOpen: on } : { rankingOpen: on })
+    .where(
+      and(
+        eq(tracks.yearId, yearId),
+        eq(tracks.semester, semester),
+        ...(what === 'rank' && on
+          ? [sql`exists (select 1 from ${trackOptions} where ${trackOptions.trackId} = ${tracks.id})`]
+          : []),
+      ),
+    )
     .returning({ id: tracks.id });
   await logActivity(user, 'set_track_term_switch', `term:${yearId}:${semester}`, {
     what,
@@ -376,12 +429,18 @@ export async function setTermSwitch(form: z.infer<typeof TermSwitchInput>): Prom
   });
   revalidatePath('/admin/tracks');
   revalidatePath('/student/track');
-  const label = what === 'choose' ? 'การเลือก' : 'การแก้ไข';
+  const label = TERM_SWITCH_LABEL[what];
   return {
     ok: true,
     message: `${on ? 'เปิด' : 'ปิด'}${label}ทุก Track ของภาคเรียนนี้แล้ว (${changed.length} Track)`,
   };
 }
+
+const TERM_SWITCH_LABEL = {
+  choose: 'การเลือก',
+  change: 'การแก้ไข',
+  rank: 'การจัดอันดับข้อย่อย',
+} as const;
 
 export async function deleteTrack(id: number): Promise<ActionResult> {
   const user = await requireRole('admin');
@@ -447,7 +506,7 @@ export async function setStudentChoice(form: z.infer<typeof ChoiceInput>): Promi
   const offGrade = !trackAllows({ gradeLevels: track.gradeLevels ?? [] }, student.gradeLevel);
 
   const existing = await db
-    .select({ id: trackChoices.id })
+    .select({ id: trackChoices.id, trackId: trackChoices.trackId })
     .from(trackChoices)
     .where(
       and(
@@ -460,10 +519,16 @@ export async function setStudentChoice(form: z.infer<typeof ChoiceInput>): Promi
 
   const actor = actorOf(user);
   if (existing.length) {
-    await db
-      .update(trackChoices)
-      .set({ trackId, optionId, changedBy: actor, changedAt: new Date() })
-      .where(eq(trackChoices.id, existing[0].id));
+    await db.transaction(async (tx) => {
+      // อันดับข้อย่อย belong to the สาย they were made in — moved to another,
+      // they would name ข้อย่อย the นักเรียน no longer holds.
+      if (existing[0].trackId !== trackId)
+        await tx.delete(trackOptionRanks).where(eq(trackOptionRanks.choiceId, existing[0].id));
+      await tx
+        .update(trackChoices)
+        .set({ trackId, optionId, changedBy: actor, changedAt: new Date() })
+        .where(eq(trackChoices.id, existing[0].id));
+    });
   } else {
     await db
       .insert(trackChoices)

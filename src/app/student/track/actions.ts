@@ -4,14 +4,15 @@ import { revalidatePath } from 'next/cache';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db';
-import { people, trackChoices, tracks } from '@/db/schema';
+import { people, trackChoices, trackOptionRanks, trackOptions, tracks } from '@/db/schema';
 import { actorOf, requireRole } from '@/lib/authz';
 import { logActivity } from '@/lib/log';
-import { latestTerm, optionProblem } from '@/lib/tracks';
+import { latestTerm } from '@/lib/tracks';
 import {
   SEMESTERS,
   changeLimitLabel,
   changeStanding,
+  rankingProblem,
   trackAllows,
   trackWindow,
   type ChangeBlock,
@@ -23,7 +24,6 @@ const ChooseInput = z.object({
   yearId: z.number().int().positive(),
   semester: z.number().int().refine((n) => SEMESTERS.includes(n as 1 | 2), 'ภาคเรียนไม่ถูกต้อง'),
   trackId: z.number().int().positive(),
-  optionId: z.number().int().positive().nullable(),
 });
 
 /**
@@ -43,7 +43,7 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
   const parsed = ChooseInput.safeParse(form);
   if (!parsed.success)
     return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
-  const { yearId, semester, trackId, optionId } = parsed.data;
+  const { yearId, semester, trackId } = parsed.data;
 
   // Only the ภาคเรียน the school is currently offering can be chosen in. Past
   // terms are readable on the same screen, but a choice there would be a
@@ -93,14 +93,10 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
   if (!trackAllows({ gradeLevels: track.gradeLevels ?? [] }, student.gradeLevel))
     return { ok: false, message: `“${track.name}” ไม่ได้เปิดให้ ${student.gradeLevel ?? 'ระดับชั้นของคุณ'}` };
 
-  const problem = await optionProblem(track, optionId);
-  if (problem) return { ok: false, message: problem };
-
   const [existing] = await db
     .select({
       id: trackChoices.id,
       trackId: trackChoices.trackId,
-      optionId: trackChoices.optionId,
       studentChanges: trackChoices.studentChanges,
       heldName: tracks.name,
       changeLimit: tracks.changeLimit,
@@ -134,28 +130,34 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
       existing.studentChanges,
     );
     if (standing.blocked) return { ok: false, message: CANNOT_CHANGE[standing.blocked] };
-    if (existing.trackId === trackId && existing.optionId === optionId)
+    if (existing.trackId === trackId)
       return { ok: false, message: 'เป็นตัวเลือกเดิมอยู่แล้ว — ไม่มีอะไรเปลี่ยน' };
 
     // Conditional on the count read above: a second tap racing this one finds
     // it already spent and updates nothing, rather than both succeeding on a
-    // single remaining change.
-    const updated = await db
-      .update(trackChoices)
-      .set({
-        trackId,
-        optionId,
-        changedBy: actorOf(user),
-        changedAt: new Date(),
-        studentChanges: existing.studentChanges + 1,
-      })
-      .where(
-        and(
-          eq(trackChoices.id, existing.id),
-          eq(trackChoices.studentChanges, existing.studentChanges),
-        ),
-      )
-      .returning({ id: trackChoices.id });
+    // single remaining change. The ข้อย่อย — the one the ผู้ดูแล set, and the
+    // อันดับ the นักเรียน made — belong to the สาย being left, so they go too.
+    const updated = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(trackChoices)
+        .set({
+          trackId,
+          optionId: null,
+          changedBy: actorOf(user),
+          changedAt: new Date(),
+          studentChanges: existing.studentChanges + 1,
+        })
+        .where(
+          and(
+            eq(trackChoices.id, existing.id),
+            eq(trackChoices.studentChanges, existing.studentChanges),
+          ),
+        )
+        .returning({ id: trackChoices.id });
+      if (rows.length)
+        await tx.delete(trackOptionRanks).where(eq(trackOptionRanks.choiceId, existing.id));
+      return rows;
+    });
     if (!updated.length)
       return { ok: false, message: 'มีการแก้ไขเกิดขึ้นพร้อมกัน — โหลดหน้าใหม่แล้วลองอีกครั้ง' };
 
@@ -163,7 +165,6 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
     await logActivity(user, 'change_track_self', `track:${trackId}`, {
       from: existing.heldName,
       track: track.name,
-      optionId,
       semester,
       change: existing.studentChanges + 1,
       limit: standing.limit,
@@ -183,7 +184,6 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
       semester,
       studentId: user.personId,
       trackId,
-      optionId,
       chosenBy: actorOf(user),
     });
   } catch {
@@ -194,7 +194,6 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
 
   await logActivity(user, 'choose_track', `track:${trackId}`, {
     track: track.name,
-    optionId,
     semester,
   });
   revalidateAll();
@@ -202,6 +201,84 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
     ok: true,
     message: `เลือก “${track.name}” เรียบร้อยแล้ว — ${changeLimitLabel(track.changeLimit)}`,
   };
+}
+
+const RankInput = z.object({
+  yearId: z.number().int().positive(),
+  semester: z.number().int().refine((n) => SEMESTERS.includes(n as 1 | 2), 'ภาคเรียนไม่ถูกต้อง'),
+  /** option ids, อันดับ 1 first */
+  ranked: z.array(z.number().int().positive()).max(30),
+});
+
+/**
+ * A นักเรียน ranking the ข้อย่อย of the สาย they hold — as often as they like
+ * while the ผู้ดูแล has ranking open; the switch is the deadline.
+ *
+ * The สาย is read off their own choice row, never taken from the form: only
+ * someone who holds the สาย may rank its ข้อย่อย, and a form that named the
+ * track would let anybody rank any of them.
+ */
+export async function rankOptions(form: z.infer<typeof RankInput>): Promise<ActionResult> {
+  const user = await requireRole('student');
+  if (!user.personId) return { ok: false, message: 'ไม่พบข้อมูลนักเรียน — ติดต่อฝ่ายวิชาการ' };
+
+  const parsed = RankInput.safeParse(form);
+  if (!parsed.success)
+    return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
+  const { yearId, semester, ranked } = parsed.data;
+
+  const open = await latestTerm();
+  if (!open || open.yearId !== yearId || open.semester !== semester)
+    return { ok: false, message: 'จัดอันดับได้เฉพาะภาคเรียนที่เปิดอยู่' };
+
+  const [held] = await db
+    .select({
+      choiceId: trackChoices.id,
+      trackId: tracks.id,
+      trackName: tracks.name,
+      rankingOpen: tracks.rankingOpen,
+      rankingRequireAll: tracks.rankingRequireAll,
+    })
+    .from(trackChoices)
+    .innerJoin(tracks, eq(trackChoices.trackId, tracks.id))
+    .where(
+      and(
+        eq(trackChoices.studentId, user.personId),
+        eq(trackChoices.yearId, yearId),
+        eq(trackChoices.semester, semester),
+      ),
+    )
+    .limit(1);
+  if (!held) return { ok: false, message: 'เลือก Track ก่อน แล้วจึงจัดอันดับข้อย่อยได้' };
+  if (!held.rankingOpen)
+    return { ok: false, message: `“${held.trackName}” ยังไม่เปิดให้จัดอันดับข้อย่อย หรือปิดไปแล้ว` };
+
+  const opts = await db
+    .select({ id: trackOptions.id })
+    .from(trackOptions)
+    .where(and(eq(trackOptions.trackId, held.trackId), eq(trackOptions.active, true)));
+  const problem = rankingProblem(
+    ranked,
+    opts.map((o) => o.id),
+    held.rankingRequireAll,
+  );
+  if (problem) return { ok: false, message: problem };
+
+  // Replace, not merge: the list on screen is the whole ranking.
+  await db.transaction(async (tx) => {
+    await tx.delete(trackOptionRanks).where(eq(trackOptionRanks.choiceId, held.choiceId));
+    await tx
+      .insert(trackOptionRanks)
+      .values(ranked.map((optionId, i) => ({ choiceId: held.choiceId, rank: i + 1, optionId })));
+  });
+
+  await logActivity(user, 'rank_track_options', `track:${held.trackId}`, {
+    track: held.trackName,
+    ranked,
+    semester,
+  });
+  revalidateAll();
+  return { ok: true, message: `บันทึกอันดับข้อย่อย ${ranked.length} อันดับแล้ว` };
 }
 
 function revalidateAll() {

@@ -83,6 +83,10 @@ export interface TrackRow {
   changeLimit: number;
   /** ผู้ดูแลเปิดให้นักเรียนแก้ไขอยู่หรือไม่ */
   changesOpen: boolean;
+  /** ผู้ดูแลเปิดให้นักเรียนจัดอันดับข้อย่อยอยู่หรือไม่ */
+  rankingOpen: boolean;
+  /** ต้องจัดครบทุกอันดับ หรือจัดบางอันดับก็ได้ */
+  rankingRequireAll: boolean;
   options: TrackOptionRow[];
   /** วิชาที่นักเรียนจะได้เรียนถ้าเลือกสายนี้ */
   subjects: TrackSubjectRow[];
@@ -247,6 +251,46 @@ export function changeNote(s: ChangeStanding): string {
     default:
       return `คุณแก้ไขได้อีก ${s.left} ครั้ง (จากทั้งหมด ${s.limit} ครั้ง)`;
   }
+}
+
+/** อันดับข้อย่อยที่นักเรียนจัดได้มากที่สุด */
+export const RANK_COUNT = 3;
+
+/**
+ * How many อันดับ a สาย asks for — three, or fewer when it has fewer ข้อย่อย:
+ * "อันดับ 3" of two ข้อย่อย is a slot nobody can fill.
+ */
+export function rankSlots(optionCount: number): number {
+  return Math.min(RANK_COUNT, optionCount);
+}
+
+/** The rule the ผู้ดูแล picked, as the นักเรียน reads it above the boxes. */
+export function rankingRuleLabel(slots: number, requireAll: boolean): string {
+  if (slots <= 1) return 'เลือกข้อย่อยที่สนใจที่สุด 1 ข้อ';
+  return requireAll
+    ? `เรียงข้อย่อยที่สนใจ ${slots} อันดับ — ต้องจัดให้ครบทุกอันดับ`
+    : `เรียงข้อย่อยที่สนใจได้สูงสุด ${slots} อันดับ — อย่างน้อยอันดับ 1`;
+}
+
+/**
+ * What is wrong with a ranking, or null — `ranked[0]` is อันดับ 1, and so on.
+ *
+ * Shared by the นักเรียน screen (to say so before the tap) and the action (to
+ * have the final say), so the two cannot disagree about what counts as done.
+ */
+export function rankingProblem(
+  ranked: number[],
+  optionIds: number[],
+  requireAll: boolean,
+): string | null {
+  const slots = rankSlots(optionIds.length);
+  if (!slots) return 'Track นี้ไม่มีข้อย่อยให้จัดอันดับ';
+  if (!ranked.length) return 'เลือกข้อย่อยอันดับ 1 ก่อน';
+  if (ranked.length > slots) return `จัดได้ไม่เกิน ${slots} อันดับ`;
+  if (requireAll && ranked.length < slots) return `จัดให้ครบทั้ง ${slots} อันดับ`;
+  if (new Set(ranked).size !== ranked.length) return 'เลือกข้อย่อยซ้ำกันไม่ได้';
+  if (ranked.some((id) => !optionIds.includes(id))) return 'ไม่พบข้อย่อยนี้ใน Track ที่เลือก';
+  return null;
 }
 
 /**

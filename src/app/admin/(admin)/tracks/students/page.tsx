@@ -3,7 +3,7 @@ import { db } from '@/db';
 import { people, trackChoices } from '@/db/schema';
 import { requireRole } from '@/lib/authz';
 import { allYears } from '@/lib/years';
-import { choiceByAdmin, resolveTerm, tracksForTerm } from '@/lib/tracks';
+import { choiceByAdmin, ranksForTerm, resolveTerm, tracksForTerm } from '@/lib/tracks';
 import { NeedYear } from '@/components/ui';
 import { ChoicesManager, type ChoiceStudent } from './choices-manager';
 
@@ -28,7 +28,7 @@ export default async function TrackChoicesPage({
   const term = await resolveTerm(Number(sp.year) || null, Number(sp.semester) || null);
   if (!term) return <NeedYear />;
 
-  const [tracks, students, choices] = await Promise.all([
+  const [tracks, students, choices, ranks] = await Promise.all([
     tracksForTerm(term.yearId, term.semester),
     db
       .select({
@@ -56,6 +56,7 @@ export default async function TrackChoicesPage({
       .where(
         and(eq(trackChoices.yearId, term.yearId), eq(trackChoices.semester, term.semester)),
       ),
+    ranksForTerm(term.yearId, term.semester),
   ]);
 
   const byStudent = new Map(choices.map((c) => [c.studentId, c]));
@@ -65,6 +66,7 @@ export default async function TrackChoicesPage({
       ...s,
       trackId: c?.trackId ?? null,
       optionId: c?.optionId ?? null,
+      ranked: ranks.get(s.id) ?? [],
       /** an admin who set or moved it — shown so an exception is visible as one */
       byAdmin: c ? choiceByAdmin(c.chosenBy, c.changedBy) : false,
       studentChanges: c?.studentChanges ?? 0,

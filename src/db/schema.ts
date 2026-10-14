@@ -445,6 +445,17 @@ export const tracks = pgTable(
      * freeze changes (ช่วงจัดห้อง) without closing the สาย to those yet to choose.
      */
     changesOpen: boolean('changes_open').notNull().default(true),
+    /**
+     * เปิดให้จัดอันดับข้อย่อย — a third switch, apart from การเลือก and
+     * การแก้ไข: the ranking usually happens after the สาย is settled, so it
+     * opens and closes on its own day. Off until the ผู้ดูแล turns it on.
+     */
+    rankingOpen: boolean('ranking_open').notNull().default(false),
+    /**
+     * ต้องจัดครบทุกอันดับ — true asks for every slot (3, or as many ข้อย่อย as
+     * there are); false lets a นักเรียน save only their first one or two.
+     */
+    rankingRequireAll: boolean('ranking_require_all').notNull().default(true),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (t) => [
@@ -454,9 +465,11 @@ export const tracks = pgTable(
 );
 
 // ── ข้อย่อยของ Track (แขนงในสาย) ────────────────────────────
-// Optional per track: TrackSM splits into กฎหมาย / บริหาร, while another สาย has
-// no split at all. A track that has options makes picking one mandatory — a
-// half-made choice is not a choice.
+// Optional per track: TrackSM splits into การตลาด / ธุรกิจ / ทำอาหาร …, while
+// another สาย has no split at all. นักเรียน who hold the สาย rank the ones they
+// are most interested in (track_option_ranks) while the ผู้ดูแล has ranking
+// open; which one a นักเรียน finally gets is `track_choices.option_id`, set by
+// the ผู้ดูแล.
 export const trackOptions = pgTable(
   'track_options',
   {
@@ -498,7 +511,7 @@ export const trackChoices = pgTable(
     trackId: integer('track_id')
       .notNull()
       .references(() => tracks.id, { onDelete: 'restrict' }),
-    /** null when the track has no ข้อย่อย */
+    /** ข้อย่อยที่ผู้ดูแลจัดให้ — null until one is set, and always on a track with none */
     optionId: integer('option_id').references(() => trackOptions.id, { onDelete: 'restrict' }),
     /** actor who first made the choice — the student themselves, or an admin */
     chosenBy: text('chosen_by').notNull(),
@@ -517,5 +530,32 @@ export const trackChoices = pgTable(
     uniqueIndex('track_choices_term_student_uq').on(t.yearId, t.semester, t.studentId),
     index('track_choices_track_idx').on(t.trackId),
     index('track_choices_student_idx').on(t.studentId),
+  ],
+);
+
+// ── อันดับข้อย่อยที่สนใจ ──────────────────────────────────────
+// Hung off the choice rather than the student: only someone who holds the สาย
+// can rank its ข้อย่อย, and when the choice goes (ล้าง, or moved to another
+// สาย) the ranking goes with it. The two unique indexes are the rules — one
+// ข้อย่อย per อันดับ, and no ข้อย่อย twice.
+export const trackOptionRanks = pgTable(
+  'track_option_ranks',
+  {
+    id: serial('id').primaryKey(),
+    choiceId: integer('choice_id')
+      .notNull()
+      .references(() => trackChoices.id, { onDelete: 'cascade' }),
+    /** 1 is the most interested */
+    rank: integer('rank').notNull(),
+    /** `restrict`: a ข้อย่อย somebody ranked cannot be deleted out from under them */
+    optionId: integer('option_id')
+      .notNull()
+      .references(() => trackOptions.id, { onDelete: 'restrict' }),
+    rankedAt: timestamp('ranked_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('track_option_ranks_rank_uq').on(t.choiceId, t.rank),
+    uniqueIndex('track_option_ranks_option_uq').on(t.choiceId, t.optionId),
+    index('track_option_ranks_option_idx').on(t.optionId),
   ],
 );
