@@ -3,7 +3,16 @@
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, BookOpen, CalendarRange, RefreshCw, Search, Trophy } from 'lucide-react';
+import {
+  AlertTriangle,
+  BookOpen,
+  CalendarRange,
+  Download,
+  RefreshCw,
+  Search,
+  Trophy,
+} from 'lucide-react';
+import { toast } from 'sonner';
 import { Badge, Button, Card, CardHeader, EmptyState, Input, Select } from '@/components/ui';
 import { SEMESTERS, type Term } from '@/lib/track-core';
 import {
@@ -13,6 +22,8 @@ import {
   type ScorePeriod,
   type ScoreSubject,
 } from '@/lib/score-rank';
+import type { Sheet } from '@/lib/xlsx';
+import { withBasePath } from '@/lib/base-path';
 import { cn, sortGrades, thaiDateTimeLongOf } from '@/lib/utils';
 import { refreshScores } from './actions';
 
@@ -76,6 +87,7 @@ export function RankingView({
   const [skipped, setSkipped] = useState<Set<string>>(() => new Set());
   const [dropped, setDropped] = useState<Set<string>>(() => new Set());
   const [q, setQ] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   function goto(yearId: number, semester: number) {
     router.push(`/admin/tracks/ranking?year=${yearId}&semester=${semester}`);
@@ -93,7 +105,11 @@ export function RankingView({
   // A ชั้น that is not in this scope falls back to its first; "all" is only
   // offered where it means something, inside a Track.
   const gradeNow =
-    grade === 'all' && scope !== 'grade' ? 'all' : grades.includes(grade) ? grade : (grades[0] ?? '');
+    grade === 'all' && scope !== 'grade'
+      ? 'all'
+      : grades.includes(grade)
+        ? grade
+        : (grades[0] ?? '');
 
   const group = useMemo(
     () => (gradeNow === 'all' ? inScope : inScope.filter((s) => s.gradeLevel === gradeNow)),
@@ -111,7 +127,10 @@ export function RankingView({
     () => new Set(groupSubjects.filter((s) => !dropped.has(s.key)).map((s) => s.key)),
     [groupSubjects, dropped],
   );
-  const shownPeriods = useMemo(() => periods.filter((p) => !skipped.has(p.key)), [periods, skipped]);
+  const shownPeriods = useMemo(
+    () => periods.filter((p) => !skipped.has(p.key)),
+    [periods, skipped],
+  );
 
   const ranked = useMemo(() => {
     const picked = new Set(shownPeriods.map((p) => p.key));
@@ -163,9 +182,105 @@ export function RankingView({
   const scopeLabel = scope.startsWith('track:')
     ? tracks.find((t) => `track:${t.id}` === scope)?.name
     : scope.startsWith('option:')
-      ? tracks.flatMap((t) => t.options.map((o) => ({ t, o }))).find(({ o }) => `option:${o.id}` === scope)
-          ?.o.name
+      ? tracks
+          .flatMap((t) => t.options.map((o) => ({ t, o })))
+          .filter(({ o }) => `option:${o.id}` === scope)
+          .map(({ t, o }) => `${t.name} › ${o.name}`)[0]
       : 'ทั้งชั้น';
+  const gradeLabel = gradeNow === 'all' ? 'ทุกชั้น' : gradeNow;
+
+  /**
+   * The ranking exactly as on the screen — every นักเรียน of the group, not
+   * only those the search leaves showing — plus a sheet that says how it was
+   * worked out, so the file still makes sense once it is passed on.
+   */
+  function rankingSheets(): Sheet[] {
+    const periodHeads = shownPeriods.map(
+      (p) => `${p.semester}/${p.examType === 'midterm' ? 'กลางภาค' : 'ปลายภาค'} (%)`,
+    );
+    const ranking: Sheet = {
+      name: 'อันดับ',
+      header: [
+        'อันดับ',
+        'รหัส',
+        'ชื่อ-สกุล',
+        'ชื่อเล่น',
+        'ชั้น',
+        'ห้อง',
+        'เลขที่',
+        'Track',
+        'ข้อย่อย',
+        ...periodHeads,
+        'วิชาที่นับ',
+        'ขาดสอบ (วิชา)',
+        'ยังไม่มีคะแนน (วิชา)',
+        'เฉลี่ยร้อยละ',
+      ],
+      widths: [8, 10, 30, 12, 8, 8, 8, 22, 18, ...periodHeads.map(() => 16), 10, 12, 16, 12],
+      rows: ranked.map((s) => [
+        s.rank,
+        s.code,
+        s.fullName,
+        s.nickname ?? '',
+        s.gradeLevel ?? '',
+        s.classroom ?? '',
+        s.classNumber,
+        s.trackName ?? 'ยังไม่เลือก',
+        s.optionName ?? '',
+        ...s.byPeriod,
+        s.total.counted,
+        s.total.absent,
+        s.total.pending,
+        s.total.percent,
+      ]),
+    };
+    const used = groupSubjects.filter((s) => counted.has(s.key));
+    const conditions: Sheet = {
+      name: 'เงื่อนไข',
+      header: ['หัวข้อ', 'ค่า'],
+      widths: [24, 70],
+      rows: [
+        ['ปีการศึกษา', term.year],
+        ['Track ของ', `ภาคเรียนที่ ${term.semester}`],
+        ['จัดอันดับใน', scopeLabel ?? ''],
+        ['ชั้น', gradeLabel],
+        ['ช่วงสอบที่นับ', shownPeriods.map((p) => p.name).join(', ')],
+        [
+          'วิธีคิด',
+          'แปลงแต่ละวิชาในแต่ละช่วงสอบเป็นร้อยละก่อน แล้วเฉลี่ย · ขาดสอบ = 0% · ยังไม่มีคะแนน = ไม่นับ',
+        ],
+        ['ดึงคะแนนเมื่อ', fetchedAt ? thaiDateTimeLongOf(new Date(fetchedAt)) : ''],
+        [],
+        [`วิชาที่นับ ${used.length} วิชา`, ''],
+        ...used.map((s) => [s.code, s.name]),
+      ],
+    };
+    return [ranking, conditions];
+  }
+
+  async function exportXlsx() {
+    setExporting(true);
+    try {
+      const fileName = `อันดับคะแนน-${term.year}-${scopeLabel ?? ''}-${gradeLabel}`;
+      // A raw URL, so it needs the deployment's /tracks prefix by hand — see base-path.ts.
+      const res = await fetch(withBasePath('/api/score-ranking'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName, sheets: rankingSheets() }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${fileName}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('ส่งออก Excel ไม่สำเร็จ ลองอีกครั้ง');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -250,7 +365,9 @@ export function RankingView({
               {g}
             </option>
           ))}
-          {scope !== 'grade' && grades.length > 1 ? <option value="all">ทุกชั้นรวมกัน</option> : null}
+          {scope !== 'grade' && grades.length > 1 ? (
+            <option value="all">ทุกชั้นรวมกัน</option>
+          ) : null}
         </Select>
       </Card>
 
@@ -358,7 +475,8 @@ export function RankingView({
           {gradeNow === 'all' ? (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <AlertTriangle className="size-4 text-[#8a6a00]" strokeWidth={1.8} />
-              กำลังจัดอันดับข้ามชั้น — ข้อสอบแต่ละชั้นไม่ใช่ชุดเดียวกัน ใช้ดูภาพรวมได้ แต่เทียบกันตรง ๆ ไม่ได้
+              กำลังจัดอันดับข้ามชั้น — ข้อสอบแต่ละชั้นไม่ใช่ชุดเดียวกัน ใช้ดูภาพรวมได้
+              แต่เทียบกันตรง ๆ ไม่ได้
             </p>
           ) : null}
 
@@ -378,18 +496,28 @@ export function RankingView({
               icon={<Trophy className="size-4.5" strokeWidth={1.8} />}
               title={`อันดับ — ${scopeLabel ?? ''}${gradeNow && gradeNow !== 'all' ? ` ${gradeNow}` : ''}`}
               action={
-                <div className="relative w-56">
-                  <Search
-                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                    strokeWidth={1.8}
-                  />
-                  <Input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="ค้นหาชื่อ / รหัส / ห้อง"
-                    className="h-9 pl-9"
-                  />
-                </div>
+                <>
+                  <Button
+                    size="sm"
+                    disabled={exporting || ranked.length === 0}
+                    onClick={exportXlsx}
+                  >
+                    <Download className="size-4" strokeWidth={1.8} />
+                    Excel
+                  </Button>
+                  <div className="relative w-56">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                      strokeWidth={1.8}
+                    />
+                    <Input
+                      value={q}
+                      onChange={(e) => setQ(e.target.value)}
+                      placeholder="ค้นหาชื่อ / รหัส / ห้อง"
+                      className="h-9 pl-9"
+                    />
+                  </div>
+                </>
               }
             />
             {group.length === 0 ? (
@@ -418,7 +546,10 @@ export function RankingView({
                   </thead>
                   <tbody className="divide-y divide-border/60">
                     {shown.map((s) => (
-                      <tr key={s.id} className={cn('hover:bg-secondary/30', s.rank === null && 'opacity-60')}>
+                      <tr
+                        key={s.id}
+                        className={cn('hover:bg-secondary/30', s.rank === null && 'opacity-60')}
+                      >
                         <td className="px-3 py-2 text-center">
                           {s.rank === null ? (
                             <span className="text-muted-foreground">–</span>
@@ -443,7 +574,9 @@ export function RankingView({
                           <p className="text-xs tabular-nums text-muted-foreground">
                             {s.code}
                             {s.total.absent ? (
-                              <span className="ml-2 text-destructive">ขาดสอบ {s.total.absent} วิชา</span>
+                              <span className="ml-2 text-destructive">
+                                ขาดสอบ {s.total.absent} วิชา
+                              </span>
                             ) : null}
                             {s.total.pending ? (
                               <span className="ml-2">ยังไม่มีคะแนน {s.total.pending} วิชา</span>
@@ -464,7 +597,10 @@ export function RankingView({
                           </td>
                         ) : null}
                         {s.byPeriod.map((v, i) => (
-                          <td key={shownPeriods[i].key} className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                          <td
+                            key={shownPeriods[i].key}
+                            className="px-3 py-2 text-right tabular-nums text-muted-foreground"
+                          >
                             {pct(v)}
                           </td>
                         ))}
@@ -479,7 +615,9 @@ export function RankingView({
                   </tbody>
                 </table>
                 {shown.length === 0 ? (
-                  <p className="px-4 py-8 text-center text-sm text-muted-foreground">ไม่พบนักเรียนตามคำค้น</p>
+                  <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    ไม่พบนักเรียนตามคำค้น
+                  </p>
                 ) : null}
               </div>
             )}
