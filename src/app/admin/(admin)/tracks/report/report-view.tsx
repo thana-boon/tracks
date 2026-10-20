@@ -74,11 +74,12 @@ export function ReportView({
   const tabs = tracks.some((t) => t.options.length) ? TABS : TABS.filter((t) => t.id !== 'ranking');
   const parts = REPORT_PARTS.filter((p) => p.id === 'all' || tabs.some((t) => t.id === p.id));
   // A raw URL, so it needs the deployment's /tracks prefix by hand — see base-path.ts.
+  // The PDF is a print page the browser saves itself — no render on the server.
   const exportHref = (format: 'xlsx' | 'pdf') =>
     withBasePath(
-      `/api/track-report?year=${term.yearId}&semester=${term.semester}` +
-        (part === 'all' ? '' : `&part=${part}`) +
-        (format === 'pdf' ? '&format=pdf' : ''),
+      (format === 'pdf' ? '/admin/tracks/report/print' : '/api/track-report') +
+        `?year=${term.yearId}&semester=${term.semester}` +
+        (part === 'all' ? '' : `&part=${part}`),
     );
 
   return (
