@@ -37,13 +37,13 @@ export interface ScoreCell {
 }
 
 export interface Tally {
-  score: number;
-  fullScore: number;
+  /** วิชา × ช่วงสอบ that went into the average */
+  counted: number;
   /** null when not one counted วิชา has a score yet */
   percent: number | null;
-  /** วิชาที่ขาดสอบ — counted as 0 out of the full score */
+  /** วิชาที่ขาดสอบ — counted as 0% */
   absent: number;
-  /** วิชาที่ครูยังไม่กรอก — left out of both sides of the sum */
+  /** วิชาที่ครูยังไม่กรอก — left out of the average */
   pending: number;
 }
 
@@ -57,39 +57,43 @@ export function round2(v: number): number {
 }
 
 /**
- * รวมคะแนนที่ได้ ÷ รวมคะแนนเต็ม × 100, over the ช่วงสอบ and วิชา picked.
+ * ค่าเฉลี่ยร้อยละ over the ช่วงสอบ and วิชา picked: each วิชา of each ช่วงสอบ
+ * is turned into a percent of its own full score first, and the percents are
+ * averaged.
  *
- * A sum of scores rather than an average of percents: a 100-คะแนน ปลายภาค
- * weighs more than a 20-คะแนน กลางภาค, which is how the school already
- * reads a total. ขาดสอบ is a 0 the นักเรียน earned; a score nobody has keyed
- * in yet is not, so it is left out of the full score too rather than dragging
- * the นักเรียน down for a ครู's backlog.
+ * Percent first, not one big sum of scores: full scores differ from วิชา to
+ * วิชา (20, 30, 50…), and a sum would let the วิชา with the biggest full score
+ * decide the order. This way every วิชา in every ช่วงสอบ weighs the same.
+ * ขาดสอบ is a 0% the นักเรียน earned; a score nobody has keyed in yet is not,
+ * so it is left out of the average rather than dragging the นักเรียน down for
+ * a ครู's backlog.
  */
 export function tally(
   cells: ScoreCell[],
   periods: ReadonlySet<string>,
   subjects: ReadonlySet<string>,
 ): Tally {
-  let score = 0;
-  let fullScore = 0;
+  let sum = 0;
+  let counted = 0;
   let absent = 0;
   let pending = 0;
   for (const c of cells) {
     if (!periods.has(c.period) || !subjects.has(c.subject)) continue;
+    // A วิชา with no full score cannot be a percent of anything.
+    if (c.fullScore <= 0) continue;
     if (c.absent) {
       absent++;
-      fullScore += c.fullScore;
+      counted++;
     } else if (c.score === null) {
       pending++;
     } else {
-      score += c.score;
-      fullScore += c.fullScore;
+      sum += (c.score / c.fullScore) * 100;
+      counted++;
     }
   }
   return {
-    score: round2(score),
-    fullScore: round2(fullScore),
-    percent: fullScore > 0 ? round2((score / fullScore) * 100) : null,
+    counted,
+    percent: counted > 0 ? round2(sum / counted) : null,
     absent,
     pending,
   };

@@ -173,8 +173,8 @@ export function RankingView({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">จัดอันดับคะแนนสอบ</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            คะแนนกลางภาค/ปลายภาคจากระบบคะแนน ปีการศึกษา {term.year} · รวมคะแนนที่ได้ ÷
-            คะแนนเต็ม ของช่วงสอบและวิชาที่เลือก ·{' '}
+            คะแนนกลางภาค/ปลายภาคจากระบบคะแนน ปีการศึกษา {term.year} · แปลงแต่ละวิชาเป็นร้อยละก่อน
+            แล้วเฉลี่ยทุกวิชาของช่วงสอบที่เลือก ·{' '}
             <Link
               href={`/admin/tracks/report?year=${term.yearId}&semester=${term.semester}`}
               className="font-medium text-primary hover:underline"
@@ -412,8 +412,8 @@ export function RankingView({
                           {p.semester}/{p.examType === 'midterm' ? 'กลางภาค' : 'ปลายภาค'} %
                         </th>
                       ))}
-                      <th className="px-3 py-2 text-right font-medium">คะแนนรวม</th>
-                      <th className="px-3 py-2 text-right font-medium">ร้อยละ</th>
+                      <th className="px-3 py-2 text-right font-medium">นับ (วิชา)</th>
+                      <th className="px-3 py-2 text-right font-medium">เฉลี่ยร้อยละ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
@@ -469,7 +469,7 @@ export function RankingView({
                           </td>
                         ))}
                         <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">
-                          {s.total.fullScore ? `${n(s.total.score)} / ${n(s.total.fullScore)}` : '–'}
+                          {s.total.counted ? n(s.total.counted) : '–'}
                         </td>
                         <td className="px-3 py-2 text-right text-base font-semibold tabular-nums">
                           {pct(s.total.percent)}

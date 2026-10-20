@@ -17,14 +17,26 @@ const cells: ScoreCell[] = [
   cell('2-midterm', 'math', 20, 20),
 ];
 
-test('sums scores over full scores, not an average of percents', () => {
+test('each วิชา becomes a percent first, so a big full score does not outweigh a small one', () => {
+  // 15/20 = 75%, 20/80 = 25% → 50%, where one big sum would say 35/100 = 35%.
+  const t = tally(
+    [cell('1-midterm', 'a', 15, 20), cell('1-midterm', 'b', 20, 80)],
+    new Set(['1-midterm']),
+    new Set(['a', 'b']),
+  );
+  assert.equal(t.percent, 50);
+  assert.equal(t.counted, 2);
+});
+
+test('the same วิชา in กลางภาค and ปลายภาค counts once per ช่วงสอบ', () => {
+  // 15/20 = 75%, 60/80 = 75%
   const t = tally(cells, new Set(['1-midterm', '1-final']), new Set(['math']));
-  assert.equal(t.score, 75);
-  assert.equal(t.fullScore, 100);
   assert.equal(t.percent, 75);
+  assert.equal(t.counted, 2);
 });
 
 test('only the ticked ช่วงสอบ and วิชา count', () => {
+  // math 75%, thai 50%
   assert.equal(tally(cells, new Set(['1-midterm']), new Set(['math', 'thai'])).percent, 62.5);
   assert.equal(tally(cells, new Set(['2-midterm']), new Set(['math'])).percent, 100);
   assert.equal(tally(cells, new Set(['2-final']), new Set(['math'])).percent, null);
