@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTrackReport, reportSheets, type ReportStudent } from './track-report';
+import { buildTrackReport, parseReportPart, reportSheets, type ReportStudent } from './track-report';
 import type { Term, TrackRow } from './track-core';
 
 const term: Term = { yearId: 1, year: '2569', semester: 1 };
@@ -198,6 +198,33 @@ test('the workbook carries a sheet per question plus one per สาย', () => {
   // Every student on รายบุคคล, only the unchosen on ยังไม่เลือก.
   assert.equal(sheets[0].rows.length, 2);
   assert.equal(sheets[3].rows.length, 1);
+});
+
+test('each part carries only the sheets behind its tab of the page', () => {
+  const r = buildTrackReport(term, [track(1, 'A', ['x', 'y']), track(2, 'B')], [
+    student({ trackId: 1, trackName: 'A', ranked: [101, 100] }),
+    student({ trackId: 1, trackName: 'A' }),
+    student(),
+  ]);
+  const names = (part: Parameters<typeof reportSheets>[1]) =>
+    reportSheets(r, part).map((s) => s.name);
+  assert.deepEqual(names('tracks'), ['สรุปจำนวนแต่ละ Track', 'A', 'B']);
+  assert.deepEqual(names('rooms'), ['สรุปตามห้อง', 'ยังไม่เลือก']);
+  assert.deepEqual(names('students'), ['รายบุคคล']);
+  assert.deepEqual(names('ranking'), ['สรุปการจัดอันดับข้อย่อย', 'ยังไม่จัดอันดับข้อย่อย']);
+  // Whole report = every part, nothing twice.
+  assert.equal(names('all').length, 8);
+  // y was อันดับ 1 for the one who ranked, so it leads its สาย.
+  const summary = reportSheets(r, 'ranking')[0];
+  assert.deepEqual(summary.rows[0], ['A', 'รวมทุกข้อย่อย', 1, 1]);
+  assert.deepEqual(summary.rows[1], ['', 'y', '', '', 1, 0, 0]);
+});
+
+test('ranking is empty on a ภาคเรียน with no ข้อย่อย, and an unknown part means all', () => {
+  const r = buildTrackReport(term, [track(1, 'A')], [student()]);
+  assert.deepEqual(reportSheets(r, 'ranking'), []);
+  assert.equal(parseReportPart('nonsense'), 'all');
+  assert.equal(parseReportPart('rooms'), 'rooms');
 });
 
 test('สรุปตามห้อง gets one column per สาย, zero where a ห้อง chose none', () => {

@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  FileText,
   ListOrdered,
   Route,
   Search,
@@ -19,12 +20,15 @@ import { Modal } from '@/components/dialog';
 import { Badge, Button, Card, CardHeader, EmptyState, Input, Select } from '@/components/ui';
 import { SEMESTERS, type Term } from '@/lib/track-core';
 import {
+  REPORT_PARTS,
   roomLabel,
+  type ReportPart,
   type ReportStudent,
   type TrackReport,
   type TrackTally,
 } from '@/lib/track-report';
 import { cn } from '@/lib/utils';
+import { withBasePath } from '@/lib/base-path';
 
 type Tab = 'tracks' | 'rooms' | 'students' | 'ranking';
 
@@ -58,6 +62,7 @@ export function ReportView({
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('tracks');
+  const [part, setPart] = useState<ReportPart>('all');
   const { term, tracks, rooms, totals } = report;
 
   function goto(yearId: number, semester: number) {
@@ -67,6 +72,14 @@ export function ReportView({
   const done = totals.students ? Math.round((totals.chosen / totals.students) * 100) : 0;
   // The ranking tab only exists while some สาย has ข้อย่อย to rank.
   const tabs = tracks.some((t) => t.options.length) ? TABS : TABS.filter((t) => t.id !== 'ranking');
+  const parts = REPORT_PARTS.filter((p) => p.id === 'all' || tabs.some((t) => t.id === p.id));
+  // A raw URL, so it needs the deployment's /tracks prefix by hand — see base-path.ts.
+  const exportHref = (format: 'xlsx' | 'pdf') =>
+    withBasePath(
+      `/api/track-report?year=${term.yearId}&semester=${term.semester}` +
+        (part === 'all' ? '' : `&part=${part}`) +
+        (format === 'pdf' ? '&format=pdf' : ''),
+    );
 
   return (
     <div className="space-y-6">
@@ -86,15 +99,38 @@ export function ReportView({
             </Link>
           </p>
         </div>
-        {/* A plain link, not a button: the file is a navigation the browser
+        {/* Plain links, not buttons: the file is a navigation the browser
             saves, so it survives a slow query and a mistrusted click alike. */}
-        <a
-          href={`/api/track-report?year=${term.yearId}&semester=${term.semester}`}
-          className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
-        >
-          <Download className="size-4.5" strokeWidth={1.8} />
-          ดาวน์โหลด Excel
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={part}
+            onChange={(e) => setPart(e.target.value as ReportPart)}
+            className="h-10 w-44"
+            aria-label="ส่วนที่จะส่งออก"
+          >
+            {parts.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.id === 'all' ? 'ส่งออกทั้งหมด' : p.label}
+              </option>
+            ))}
+          </Select>
+          <a
+            href={exportHref('xlsx')}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
+          >
+            <Download className="size-4.5" strokeWidth={1.8} />
+            Excel
+          </a>
+          <a
+            href={exportHref('pdf')}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-medium hover:bg-secondary/60"
+          >
+            <FileText className="size-4.5" strokeWidth={1.8} />
+            PDF
+          </a>
+        </div>
       </div>
 
       <Card className="flex flex-wrap items-center gap-3 p-4 sm:p-5">

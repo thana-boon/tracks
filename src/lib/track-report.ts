@@ -260,12 +260,29 @@ function personCells(s: ReportStudent) {
   ];
 }
 
+/** Which reading of the report to export — the page's tabs, or all of them. */
+export type ReportPart = 'all' | 'tracks' | 'rooms' | 'students' | 'ranking';
+
+export const REPORT_PARTS: { id: ReportPart; label: string }[] = [
+  { id: 'all', label: 'ทั้งหมด' },
+  { id: 'tracks', label: 'แยกตาม Track' },
+  { id: 'rooms', label: 'แยกตามห้อง' },
+  { id: 'students', label: 'รายบุคคล' },
+  { id: 'ranking', label: 'จัดอันดับข้อย่อย' },
+];
+
+/** A part out of a query string — anything unknown is the whole report. */
+export function parseReportPart(v: string | null): ReportPart {
+  return REPORT_PARTS.some((p) => p.id === v) ? (v as ReportPart) : 'all';
+}
+
 /**
- * The workbook the ดาวน์โหลด button hands over: one sheet per question, then
+ * The sheets the ดาวน์โหลด buttons hand over: one sheet per question, then
  * one sheet per สาย so a หัวหน้าสาย can be sent their own tab without anyone
- * having to filter anything.
+ * having to filter anything. `part` keeps it to the sheets behind one tab of
+ * the page; the .xlsx and the PDF are both built from what comes back.
  */
-export function reportSheets(report: TrackReport): Sheet[] {
+export function reportSheets(report: TrackReport, part: ReportPart = 'all'): Sheet[] {
   const { tracks, rooms, totals } = report;
   const optionName = new Map(tracks.flatMap((t) => t.options.map((o) => [o.id, o.name] as const)));
   const rankHeader = Array.from({ length: RANK_COUNT }, (_, i) => `สนใจอันดับ ${i + 1}`);
@@ -355,10 +372,21 @@ export function reportSheets(report: TrackReport): Sheet[] {
     ]),
   }));
 
-  // ใครยังไม่จัดอันดับข้อย่อย — only when some สาย has ข้อย่อย to rank.
+  // The จัดอันดับข้อย่อย sheets — only when some สาย has ข้อย่อย to rank.
   const ranking = tracks.filter((t) => t.options.length);
-  const notRanked: Sheet[] = ranking.length
+  const rankSheets: Sheet[] = ranking.length
     ? [
+        {
+          name: 'สรุปการจัดอันดับข้อย่อย',
+          header: ['Track', 'ข้อย่อย', 'จัดแล้ว', 'ยังไม่จัด', ...rankHeader],
+          widths: [24, 20, 10, 10, ...rankWidths],
+          rows: ranking.flatMap((t) => [
+            [t.name, 'รวมทุกข้อย่อย', t.ranked, t.unranked.length],
+            ...[...t.options]
+              .sort((a, b) => b.byRank[0] - a.byRank[0] || b.byRank[1] - a.byRank[1])
+              .map((o) => ['', o.name, '', '', ...o.byRank]),
+          ]),
+        },
         {
           name: 'ยังไม่จัดอันดับข้อย่อย',
           header: ['Track', ...PERSON_HEADER],
@@ -368,10 +396,22 @@ export function reportSheets(report: TrackReport): Sheet[] {
       ]
     : [];
 
-  return [everyone, counts, byRoom, stillPending, ...notRanked, ...rosters];
+  switch (part) {
+    case 'tracks':
+      return [counts, ...rosters];
+    case 'rooms':
+      return [byRoom, stillPending];
+    case 'students':
+      return [everyone];
+    case 'ranking':
+      return rankSheets;
+    default:
+      return [everyone, counts, byRoom, stillPending, ...rankSheets, ...rosters];
+  }
 }
 
-/** `Track-2569-1.xlsx` — sortable, and safe on every filesystem. */
-export function reportFileName(term: Term): string {
-  return `Track-${term.year}-เทอม${term.semester}.xlsx`;
+/** `Track-2569-เทอม1-แยกตามห้อง.pdf` — sortable, and safe on every filesystem. */
+export function reportFileName(term: Term, part: ReportPart, ext: 'xlsx' | 'pdf'): string {
+  const label = part === 'all' ? '' : `-${REPORT_PARTS.find((p) => p.id === part)!.label}`;
+  return `Track-${term.year}-เทอม${term.semester}${label}.${ext}`;
 }
