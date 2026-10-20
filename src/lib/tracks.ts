@@ -440,35 +440,7 @@ export async function trackReportFor(term: Term): Promise<TrackReport> {
   const [defined, ranks, rows] = await Promise.all([
     tracksForTerm(term.yearId, term.semester),
     ranksForTerm(term.yearId, term.semester),
-    db
-      .select({
-        id: people.id,
-        code: people.code,
-        fullName: people.fullName,
-        nickname: people.nickname,
-        gradeLevel: people.gradeLevel,
-        classroom: people.classroom,
-        classNumber: people.classNumber,
-        trackId: trackChoices.trackId,
-        trackName: tracks.name,
-        optionId: trackChoices.optionId,
-        optionName: trackOptions.name,
-        chosenBy: trackChoices.chosenBy,
-        changedBy: trackChoices.changedBy,
-      })
-      .from(people)
-      .leftJoin(
-        trackChoices,
-        and(
-          eq(trackChoices.studentId, people.id),
-          eq(trackChoices.yearId, term.yearId),
-          eq(trackChoices.semester, term.semester),
-        ),
-      )
-      .leftJoin(tracks, eq(trackChoices.trackId, tracks.id))
-      .leftJoin(trackOptions, eq(trackChoices.optionId, trackOptions.id))
-      .where(and(eq(people.type, 'student'), eq(people.status, 'studying')))
-      .orderBy(asc(people.gradeLevel), asc(people.classroom), asc(people.classNumber)),
+    studentsWithChoice(term),
   ]);
 
   const students: ReportStudent[] = rows.map(({ chosenBy, changedBy, ...s }) => ({
@@ -477,6 +449,42 @@ export async function trackReportFor(term: Term): Promise<TrackReport> {
     byAdmin: chosenBy !== null && choiceByAdmin(chosenBy, changedBy),
   }));
   return buildTrackReport(term, defined, students);
+}
+
+/**
+ * Every studying นักเรียน with the สาย (and ข้อย่อย) they hold in one ภาคเรียน,
+ * or nulls — the roster both รายงานสรุป and จัดอันดับคะแนน start from.
+ */
+export function studentsWithChoice(term: Term) {
+  return db
+    .select({
+      id: people.id,
+      code: people.code,
+      fullName: people.fullName,
+      nickname: people.nickname,
+      gradeLevel: people.gradeLevel,
+      classroom: people.classroom,
+      classNumber: people.classNumber,
+      trackId: trackChoices.trackId,
+      trackName: tracks.name,
+      optionId: trackChoices.optionId,
+      optionName: trackOptions.name,
+      chosenBy: trackChoices.chosenBy,
+      changedBy: trackChoices.changedBy,
+    })
+    .from(people)
+    .leftJoin(
+      trackChoices,
+      and(
+        eq(trackChoices.studentId, people.id),
+        eq(trackChoices.yearId, term.yearId),
+        eq(trackChoices.semester, term.semester),
+      ),
+    )
+    .leftJoin(tracks, eq(trackChoices.trackId, tracks.id))
+    .leftJoin(trackOptions, eq(trackChoices.optionId, trackOptions.id))
+    .where(and(eq(people.type, 'student'), eq(people.status, 'studying')))
+    .orderBy(asc(people.gradeLevel), asc(people.classroom), asc(people.classNumber));
 }
 
 /**

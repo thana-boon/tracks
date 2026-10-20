@@ -66,6 +66,10 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       SCHOOLOS_API_BASE_URL: ${SCHOOLOS_API_BASE_URL:?set SCHOOLOS_API_BASE_URL in .env}
       SCHOOLOS_API_KEY: ${SCHOOLOS_API_KEY:?set SCHOOLOS_API_KEY in .env}
+      # SchoolOS score service (คะแนนสอบ) for จัดอันดับคะแนนสอบ. Optional: left
+      # unset, only that page says so — the rest of the app does not need it.
+      SCORE_API_BASE_URL: ${SCORE_API_BASE_URL:-http://192.168.200.56:3006/score}
+      SCORE_API: ${SCORE_API:-}
       # ── Silent SSO ────────────────────────────────────────
       # Runtime, NOT build args: these are where the platform lives, and moving
       # it should be an .env edit and a restart, not a rebuild of every system.

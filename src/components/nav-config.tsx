@@ -24,6 +24,7 @@ import {
   Archive,
   UserRoundX,
   ChartPie,
+  Trophy,
 } from 'lucide-react';
 import type { AppRole } from '@/lib/session';
 
@@ -89,6 +90,7 @@ export function navFor(role: AppRole, opts: { moderator?: boolean } = {}): NavEn
           { href: '/admin/tracks', label: 'จัดการ Track', icon: <Route className="size-5" strokeWidth={sw} /> },
           { href: '/admin/tracks/students', label: 'การเลือกของนักเรียน', icon: <Users className="size-5" strokeWidth={sw} /> },
           { href: '/admin/tracks/report', label: 'รายงานสรุป Track', icon: <ChartPie className="size-5" strokeWidth={sw} /> },
+          { href: '/admin/tracks/ranking', label: 'จัดอันดับคะแนนสอบ', icon: <Trophy className="size-5" strokeWidth={sw} /> },
         ],
       },
       {
