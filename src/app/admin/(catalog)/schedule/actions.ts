@@ -44,8 +44,8 @@ const AddInput = z.object({
   dates: z.array(z.string()).min(1, 'เลือกวันที่อย่างน้อย 1 วัน'),
   /**
    * Where the new รอบ's นักเรียน come from, if anywhere: the นักเรียน who chose
-   * a สาย (or one แขนง of it) for themselves, or a กลุ่มเรียนพิเศษ saved
-   * earlier. Only read when sectionId is null.
+   * a สาย (or one แขนง of it) for themselves, a กลุ่มเรียนพิเศษ saved earlier,
+   * or a ห้องประจำชั้น (from ตารางรอบ). Only read when sectionId is null.
    */
   source: z
     .discriminatedUnion('kind', [
@@ -58,6 +58,11 @@ const AddInput = z.object({
       z.object({
         kind: z.literal('classroom'),
         classroomId: z.number().int().positive(),
+      }),
+      z.object({
+        kind: z.literal('homeroom'),
+        gradeLevel: z.string().trim().min(1).max(20),
+        classroom: z.string().trim().min(1).max(20),
       }),
     ])
     .nullable()
@@ -130,6 +135,21 @@ export async function addClassDays(input: z.infer<typeof AddInput>): Promise<Add
         from: 'จาก Track',
         studentIds: [...new Set(ids)],
       };
+    } else if (source.kind === 'homeroom') {
+      const members = await db
+        .select({ id: people.id })
+        .from(people)
+        .where(
+          and(
+            eq(people.type, 'student'),
+            eq(people.status, 'studying'),
+            eq(people.gradeLevel, source.gradeLevel),
+            eq(people.classroom, source.classroom),
+          ),
+        );
+      const name = `${source.gradeLevel}/${source.classroom}`;
+      if (!members.length) return { ok: false, message: `ห้อง ${name} ยังไม่มีนักเรียน` };
+      fromSource = { label: name, from: `ห้อง ${name}`, studentIds: members.map((m) => m.id) };
     } else {
       const [room] = await db
         .select({ id: classrooms.id, name: classrooms.name })

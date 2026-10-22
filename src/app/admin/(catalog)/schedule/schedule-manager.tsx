@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowUpRight,
   CalendarDays,
@@ -17,11 +17,20 @@ import {
   Search,
   Trash2,
   Users,
-} from 'lucide-react';
-import { toast } from 'sonner';
-import { Badge, Button, Card, CardHeader, EmptyState, Input, Label, Select } from '@/components/ui';
-import { Modal, useDialog } from '@/components/dialog';
-import { ThaiCalendar, SelectedDates } from '@/components/thai-calendar';
+} from "lucide-react";
+import { toast } from "sonner";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  Input,
+  Label,
+  Select,
+} from "@/components/ui";
+import { Modal, useDialog } from "@/components/dialog";
+import { ThaiCalendar, SelectedDates } from "@/components/thai-calendar";
 import {
   cn,
   compareClassLabels,
@@ -30,10 +39,11 @@ import {
   todayYmd,
   weekdayOfYmd,
   THAI_WEEKDAYS_SHORT,
-} from '@/lib/utils';
-import type { ScheduleRow } from '@/lib/schedule';
-import { groupTint } from '@/lib/group-color';
-import { addClassDays, moveClassDay, removeClassDay } from './actions';
+} from "@/lib/utils";
+import type { ScheduleBlock, ScheduleRow } from "@/lib/schedule";
+import { groupTint } from "@/lib/group-color";
+import { addClassDays, moveClassDay, removeClassDay } from "./actions";
+import { TermBoard } from "./term-board";
 
 export interface ScheduleGroup {
   id: number;
@@ -47,6 +57,7 @@ export interface ScheduleSubject {
   code: string;
   name: string;
   teacherName: string | null;
+  institution: string | null;
   semester: number | null;
   phase: number | null;
   groupId: number;
@@ -87,6 +98,16 @@ export interface ScheduleSavedGroup {
   studentCount: number;
 }
 
+/** A ห้องประจำชั้น ม.4-6, offered on ตารางรอบ as a ready-made ห้อง. */
+export interface ScheduleHomeroom {
+  gradeLevel: string;
+  classroom: string;
+  studentCount: number;
+}
+
+/** ภาคเรียนที่ 1, ภาคเรียนที่ 2, or the whole year as one list. */
+type View = 1 | 2 | "list";
+
 /** What the add form is holding before it is saved. */
 interface Draft {
   subjectId: number | null;
@@ -106,8 +127,8 @@ const EMPTY_DRAFT: Draft = {
   subjectId: null,
   sectionId: null,
   sourceKey: null,
-  newName: '',
-  room: '',
+  newName: "",
+  room: "",
   dates: [],
 };
 
@@ -123,6 +144,8 @@ const EMPTY_DRAFT: Draft = {
 export function ScheduleManager({
   yearLabel,
   rows,
+  blocks,
+  homerooms,
   checkedKeys,
   groups,
   subjects,
@@ -133,6 +156,8 @@ export function ScheduleManager({
 }: {
   yearLabel: string;
   rows: ScheduleRow[];
+  blocks: ScheduleBlock[];
+  homerooms: ScheduleHomeroom[];
   checkedKeys: string[];
   groups: ScheduleGroup[];
   subjects: ScheduleSubject[];
@@ -144,6 +169,7 @@ export function ScheduleManager({
   canRegister: boolean;
 }) {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [view, setView] = useState<View>(1);
   const router = useRouter();
   const checked = useMemo(() => new Set(checkedKeys), [checkedKeys]);
 
@@ -164,54 +190,109 @@ export function ScheduleManager({
     <div className="space-y-6">
       <Header yearLabel={yearLabel} canRegister={canRegister} />
 
-      <AddRow
-        draft={draft}
-        onDraft={setDraft}
-        groups={groups}
-        subjects={subjects}
-        sections={sections}
-        trackGroups={trackGroups}
-        savedGroups={savedGroups}
-        onDone={() => {
-          setDraft(EMPTY_DRAFT);
-          router.refresh();
-        }}
-      />
+      <div
+        role="tablist"
+        className="flex flex-wrap gap-1 rounded-xl border border-border bg-card p-1"
+      >
+        {(
+          [
+            [1, "ภาคเรียนที่ 1"],
+            [2, "ภาคเรียนที่ 2"],
+            ["list", "รายการทั้งหมด"],
+          ] as [View, string][]
+        ).map(([v, label]) => (
+          <button
+            key={v}
+            type="button"
+            role="tab"
+            aria-selected={view === v}
+            onClick={() => setView(v)}
+            className={cn(
+              "flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+              view === v
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-      <ScheduleTable
-        rows={rows}
-        checked={checked}
-        groups={groups}
-        onChanged={() => router.refresh()}
-      />
+      {view !== "list" ? (
+        <TermBoard
+          semester={view}
+          blocks={blocks}
+          rows={rows}
+          checked={checked}
+          groups={groups}
+          subjects={subjects}
+          homerooms={homerooms}
+          trackGroups={trackGroups}
+          savedGroups={savedGroups}
+          canPlace={canRegister}
+        />
+      ) : (
+        <>
+          <AddRow
+            draft={draft}
+            onDraft={setDraft}
+            groups={groups}
+            subjects={subjects}
+            sections={sections}
+            trackGroups={trackGroups}
+            savedGroups={savedGroups}
+            onDone={() => {
+              setDraft(EMPTY_DRAFT);
+              router.refresh();
+            }}
+          />
 
-      <UnscheduledSections
-        sections={sections}
-        subjects={subjects}
-        rows={rows}
-        onPick={(s) =>
-          setDraft({
-            subjectId: s.subjectId,
-            sectionId: s.id,
-            sourceKey: null,
-            newName: '',
-            room: s.room ?? '',
-            dates: [],
-          })
-        }
-      />
+          <ScheduleTable
+            rows={rows}
+            checked={checked}
+            groups={groups}
+            onChanged={() => router.refresh()}
+          />
+
+          <UnscheduledSections
+            sections={sections}
+            subjects={subjects}
+            rows={rows}
+            onPick={(s) =>
+              setDraft({
+                subjectId: s.subjectId,
+                sectionId: s.id,
+                sourceKey: null,
+                newName: "",
+                room: s.room ?? "",
+                dates: [],
+              })
+            }
+          />
+        </>
+      )}
     </div>
   );
 }
 
-function Header({ yearLabel, canRegister }: { yearLabel: string; canRegister: boolean }) {
+function Header({
+  yearLabel,
+  canRegister,
+}: {
+  yearLabel: string;
+  canRegister: boolean;
+}) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">ตารางเรียนทั้งปี</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          ตารางเรียนทั้งปี
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          วันเรียนทุกวันของ {yearLabel} — วันที่ · วิชา · กลุ่มเรียน ·
-          ใช้ข้อมูลชุดเดียวกับหน้าจัดนักเรียนเข้าวิชา แก้ที่ไหนก็ตรงกันทั้งสองหน้า
+          วันเรียนทุกวันของ {yearLabel} แยกตามภาคเรียน — กำหนดรอบ ห้อง และวัน
+          แล้วเลือกวิชาลงช่อง · ใช้ข้อมูลชุดเดียวกับหน้าจัดนักเรียนเข้าวิชา
+          แก้ที่ไหนก็ตรงกันทั้งสองหน้า
         </p>
       </div>
       {canRegister ? (
@@ -219,7 +300,10 @@ function Header({ yearLabel, canRegister }: { yearLabel: string; canRegister: bo
           href="/admin/register"
           className="group inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2.5 text-sm font-medium transition-colors hover:border-primary/35 hover:bg-secondary/60"
         >
-          <ClipboardPen className="size-4.5 text-muted-foreground" strokeWidth={1.8} />
+          <ClipboardPen
+            className="size-4.5 text-muted-foreground"
+            strokeWidth={1.8}
+          />
           ไปหน้าจัดนักเรียนเข้าวิชา
           <ArrowUpRight
             className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
@@ -281,7 +365,7 @@ function AddRow({
   const picked = useMemo(() => {
     const key = draft.sourceKey;
     if (draft.sectionId !== null || !key) return null;
-    if (key.startsWith('track:')) {
+    if (key.startsWith("track:")) {
       const t = trackGroups.find((x) => `track:${x.key}` === key);
       return t
         ? {
@@ -289,7 +373,7 @@ function AddRow({
             studentCount: t.studentCount,
             who: `นักเรียนที่เลือก ${t.label}`,
             source: {
-              kind: 'track' as const,
+              kind: "track" as const,
               semester: t.semester,
               trackId: t.trackId,
               optionId: t.optionId,
@@ -303,7 +387,7 @@ function AddRow({
           label: g.name,
           studentCount: g.studentCount,
           who: `นักเรียนในกลุ่ม “${g.name}”`,
-          source: { kind: 'classroom' as const, classroomId: g.id },
+          source: { kind: "classroom" as const, classroomId: g.id },
         }
       : null;
   }, [draft.sectionId, draft.sourceKey, trackGroups, savedGroups]);
@@ -320,11 +404,11 @@ function AddRow({
   async function submit() {
     if (saving) return;
     if (!draft.subjectId) {
-      toast.error('เลือกวิชาก่อน');
+      toast.error("เลือกวิชาก่อน");
       return;
     }
     if (draft.dates.length === 0) {
-      toast.error('เลือกวันที่อย่างน้อย 1 วัน');
+      toast.error("เลือกวันที่อย่างน้อย 1 วัน");
       return;
     }
     setSaving(true);
@@ -348,7 +432,7 @@ function AddRow({
 
   const dateLabel =
     draft.dates.length === 0
-      ? 'เลือกวันที่'
+      ? "เลือกวันที่"
       : draft.dates.length === 1
         ? thaiDateLong(draft.dates[0])
         : `${thaiDateLong(draft.dates[0])} +${draft.dates.length - 1} วัน`;
@@ -358,7 +442,11 @@ function AddRow({
       <CardHeader
         icon={<Plus className="size-4.5" strokeWidth={1.8} />}
         title="เพิ่มวันเรียนลงตาราง"
-        action={draft.dates.length ? <Badge tone="primary">{draft.dates.length} วัน</Badge> : null}
+        action={
+          draft.dates.length ? (
+            <Badge tone="primary">{draft.dates.length} วัน</Badge>
+          ) : null
+        }
       />
 
       <div className="grid gap-3 px-4 pb-4 sm:px-5 sm:pb-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_auto] lg:items-end">
@@ -371,11 +459,14 @@ function AddRow({
             onClick={() => setOpenCalendar((v) => !v)}
             aria-expanded={openCalendar}
             className={cn(
-              'flex h-11 w-full items-center gap-2 rounded-lg border border-input bg-card px-3.5 text-left text-sm transition-colors hover:bg-secondary/40',
-              draft.dates.length === 0 && 'text-muted-foreground',
+              "flex h-11 w-full items-center gap-2 rounded-lg border border-input bg-card px-3.5 text-left text-sm transition-colors hover:bg-secondary/40",
+              draft.dates.length === 0 && "text-muted-foreground",
             )}
           >
-            <CalendarDays className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+            <CalendarDays
+              className="size-4.5 shrink-0 text-muted-foreground"
+              strokeWidth={1.8}
+            />
             <span className="min-w-0 flex-1 truncate">{dateLabel}</span>
           </button>
         </div>
@@ -385,7 +476,7 @@ function AddRow({
           <Label htmlFor="sc-subject">วิชา</Label>
           <Select
             id="sc-subject"
-            value={draft.subjectId ?? ''}
+            value={draft.subjectId ?? ""}
             onChange={(e) =>
               onDraft({
                 ...draft,
@@ -393,8 +484,8 @@ function AddRow({
                 // A กลุ่ม belongs to one วิชา — changing the วิชา cannot keep it.
                 sectionId: null,
                 sourceKey: null,
-                newName: '',
-                room: '',
+                newName: "",
+                room: "",
               })
             }
           >
@@ -418,13 +509,13 @@ function AddRow({
           <Label htmlFor="sc-section">กลุ่มที่เรียน</Label>
           <Select
             id="sc-section"
-            value={draft.sectionId ?? draft.sourceKey ?? 'new'}
+            value={draft.sectionId ?? draft.sourceKey ?? "new"}
             onChange={(e) => {
               const v = e.target.value;
-              const isSource = v.startsWith('track:') || v.startsWith('room:');
+              const isSource = v.startsWith("track:") || v.startsWith("room:");
               onDraft({
                 ...draft,
-                sectionId: v === 'new' || isSource ? null : Number(v),
+                sectionId: v === "new" || isSource ? null : Number(v),
                 sourceKey: isSource ? v : null,
               });
             }}
@@ -435,15 +526,17 @@ function AddRow({
                 {forSubject.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
-                    {s.room ? ` · ${s.room}` : ''} · {s.studentCount} คน
+                    {s.room ? ` · ${s.room}` : ""} · {s.studentCount} คน
                   </option>
                 ))}
               </optgroup>
             ) : null}
             {[
-              { label: 'นักเรียนที่เลือก Track เอง', items: ownTracks },
+              { label: "นักเรียนที่เลือก Track เอง", items: ownTracks },
               {
-                label: ownTracks.length ? 'นักเรียนที่เลือก Track อื่น' : 'นักเรียนที่เลือก Track เอง',
+                label: ownTracks.length
+                  ? "นักเรียนที่เลือก Track อื่น"
+                  : "นักเรียนที่เลือก Track เอง",
                 items: otherTracks,
               },
             ].map((g) =>
@@ -467,7 +560,9 @@ function AddRow({
               </optgroup>
             ) : null}
             <option value="new">
-              {forSubject.length === 0 ? '— ยังไม่มีกลุ่ม: เปิดกลุ่มใหม่ —' : '+ เปิดกลุ่มใหม่'}
+              {forSubject.length === 0
+                ? "— ยังไม่มีกลุ่ม: เปิดกลุ่มใหม่ —"
+                : "+ เปิดกลุ่มใหม่"}
             </option>
           </Select>
         </div>
@@ -489,7 +584,10 @@ function AddRow({
         <div className="grid gap-3 border-t border-border/60 bg-secondary/20 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end sm:px-5">
           <div className="min-w-0">
             <Label htmlFor="sc-name">
-              ชื่อกลุ่มใหม่ <span className="font-normal text-muted-foreground">(ไม่บังคับ)</span>
+              ชื่อกลุ่มใหม่{" "}
+              <span className="font-normal text-muted-foreground">
+                (ไม่บังคับ)
+              </span>
             </Label>
             <Input
               id="sc-name"
@@ -498,7 +596,7 @@ function AddRow({
               placeholder={
                 picked
                   ? `เว้นว่างได้ — ใช้ชื่อ “${picked.label}”`
-                  : 'เช่น ม.4 กลุ่มเรียนที่ 1 — เว้นว่างได้ ระบบตั้งจากวันเรียนให้'
+                  : "เช่น ม.4 กลุ่มเรียนที่ 1 — เว้นว่างได้ ระบบตั้งจากวันเรียนให้"
               }
             />
           </div>
@@ -514,7 +612,7 @@ function AddRow({
           <p className="text-xs text-muted-foreground sm:pb-3">
             {picked
               ? `ใส่${picked.who} ${picked.studentCount} คนให้เลย — คนที่อยู่กลุ่มอื่นของวิชานี้แล้วจะคงอยู่ที่เดิม`
-              : 'กลุ่มใหม่จะยังไม่มีนักเรียน — เลือกนักเรียนต่อที่หน้าจัดนักเรียนเข้าวิชา'}
+              : "กลุ่มใหม่จะยังไม่มีนักเรียน — เลือกนักเรียนต่อที่หน้าจัดนักเรียนเข้าวิชา"}
           </p>
         </div>
       ) : null}
@@ -525,7 +623,8 @@ function AddRow({
             <ThaiCalendar selected={draft.dates} onToggle={toggleDate} />
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">
-                กดวันที่เพื่อเลือก เลือกได้หลายวันในครั้งเดียว — ทุกวันที่เลือกจะถูกใส่ให้กลุ่มเดียวกัน
+                กดวันที่เพื่อเลือก เลือกได้หลายวันในครั้งเดียว —
+                ทุกวันที่เลือกจะถูกใส่ให้กลุ่มเดียวกัน
               </p>
               <SelectedDates dates={draft.dates} onRemove={toggleDate} />
               {draft.dates.length ? (
@@ -572,10 +671,10 @@ function ScheduleTable({
   groups: ScheduleGroup[];
   onChanged: () => void;
 }) {
-  const [groupId, setGroupId] = useState<number | 'all'>('all');
-  const [semester, setSemester] = useState<string>('all');
-  const [month, setMonth] = useState<string>('all');
-  const [q, setQ] = useState('');
+  const [groupId, setGroupId] = useState<number | "all">("all");
+  const [semester, setSemester] = useState<string>("all");
+  const [month, setMonth] = useState<string>("all");
+  const [q, setQ] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [moving, setMoving] = useState<ScheduleRow | null>(null);
   const [folded, setFolded] = useState<Set<string>>(new Set());
@@ -590,16 +689,17 @@ function ScheduleTable({
   const shown = useMemo(
     () =>
       rows.filter((r) => {
-        if (groupId !== 'all' && r.groupId !== groupId) return false;
-        if (semester !== 'all' && String(r.semester ?? '') !== semester) return false;
-        if (month !== 'all' && r.date.slice(0, 7) !== month) return false;
+        if (groupId !== "all" && r.groupId !== groupId) return false;
+        if (semester !== "all" && String(r.semester ?? "") !== semester)
+          return false;
+        if (month !== "all" && r.date.slice(0, 7) !== month) return false;
         if (!needle) return true;
         return (
           r.subjectCode.toLowerCase().includes(needle) ||
           r.subjectName.toLowerCase().includes(needle) ||
           r.sectionName.toLowerCase().includes(needle) ||
-          (r.room ?? '').toLowerCase().includes(needle) ||
-          (r.teacherName ?? '').toLowerCase().includes(needle)
+          (r.room ?? "").toLowerCase().includes(needle) ||
+          (r.teacherName ?? "").toLowerCase().includes(needle)
         );
       }),
     [rows, groupId, semester, month, needle],
@@ -618,7 +718,8 @@ function ScheduleTable({
     return list;
   }, [shown]);
 
-  const allFolded = buckets.length > 0 && buckets.every((b) => folded.has(b.key));
+  const allFolded =
+    buckets.length > 0 && buckets.every((b) => folded.has(b.key));
   const sectionsShown = new Set(shown.map((r) => r.sectionId)).size;
 
   async function remove(r: ScheduleRow) {
@@ -627,10 +728,10 @@ function ScheduleTable({
     const ok = await dialog.confirm({
       title: `เอา ${thaiDateLong(r.date)} ออกจาก “${r.sectionName}”?`,
       description:
-        'วันเรียนนี้จะหายไปจากตารางและจากหน้าจัดนักเรียนเข้าวิชา — กลุ่มและรายชื่อนักเรียนยังอยู่',
-      detail: [`${r.subjectCode} ${r.subjectName}`, r.room ?? 'ยังไม่ระบุห้อง'],
-      tone: 'destructive',
-      confirmLabel: 'เอาวันนี้ออก',
+        "วันเรียนนี้จะหายไปจากตารางและจากหน้าจัดนักเรียนเข้าวิชา — กลุ่มและรายชื่อนักเรียนยังอยู่",
+      detail: [`${r.subjectCode} ${r.subjectName}`, r.room ?? "ยังไม่ระบุห้อง"],
+      tone: "destructive",
+      confirmLabel: "เอาวันนี้ออก",
     });
     if (!ok) return;
     setBusy(key);
@@ -675,7 +776,11 @@ function ScheduleTable({
             </div>
             <Select
               value={String(groupId)}
-              onChange={(e) => setGroupId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+              onChange={(e) =>
+                setGroupId(
+                  e.target.value === "all" ? "all" : Number(e.target.value),
+                )
+              }
               className="h-10 w-40"
             >
               <option value="all">ทุกหมวด</option>
@@ -713,7 +818,9 @@ function ScheduleTable({
               size="sm"
               className="h-10"
               onClick={() =>
-                setFolded(allFolded ? new Set() : new Set(buckets.map((b) => b.key)))
+                setFolded(
+                  allFolded ? new Set() : new Set(buckets.map((b) => b.key)),
+                )
               }
               disabled={buckets.length === 0}
             >
@@ -722,7 +829,7 @@ function ScheduleTable({
               ) : (
                 <ChevronsDownUp className="size-4" strokeWidth={1.9} />
               )}
-              {allFolded ? 'ขยายทั้งหมด' : 'ย่อทั้งหมด'}
+              {allFolded ? "ขยายทั้งหมด" : "ย่อทั้งหมด"}
             </Button>
           </div>
         </div>
@@ -802,8 +909,8 @@ function MonthBlock({
   const rows = [...bucket.rows].sort(
     (a, b) =>
       a.date.localeCompare(b.date) ||
-      a.groupCode.localeCompare(b.groupCode, 'th', { numeric: true }) ||
-      a.subjectCode.localeCompare(b.subjectCode, 'th', { numeric: true }) ||
+      a.groupCode.localeCompare(b.groupCode, "th", { numeric: true }) ||
+      a.subjectCode.localeCompare(b.subjectCode, "th", { numeric: true }) ||
       compareClassLabels(a.sectionName, b.sectionName),
   );
   const today = todayYmd();
@@ -815,11 +922,14 @@ function MonthBlock({
         onClick={onToggle}
         aria-expanded={open}
         className={cn(
-          'flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors hover:bg-secondary/40 sm:px-5',
-          open && 'bg-secondary/30',
+          "flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors hover:bg-secondary/40 sm:px-5",
+          open && "bg-secondary/30",
         )}
       >
-        <CalendarDays className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+        <CalendarDays
+          className="size-4.5 shrink-0 text-muted-foreground"
+          strokeWidth={1.8}
+        />
         <span className="font-semibold">{thaiMonthLabel(bucket.key)}</span>
         <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
           {bucket.days} วัน · {rows.length} รายการ
@@ -838,34 +948,40 @@ function MonthBlock({
             return (
               <li
                 key={`${key}:${r.subjectId}`}
-                style={tint ? { backgroundColor: tint.surface.backgroundColor } : undefined}
+                style={
+                  tint
+                    ? { backgroundColor: tint.surface.backgroundColor }
+                    : undefined
+                }
                 className={cn(
-                  'flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 hover:bg-secondary/30 sm:px-5',
-                  newDay ? 'border-t border-border/40 first:border-t-0' : '',
+                  "flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 hover:bg-secondary/30 sm:px-5",
+                  newDay ? "border-t border-border/40 first:border-t-0" : "",
                 )}
               >
                 <div
                   className={cn(
-                    'w-36 shrink-0 text-sm tabular-nums',
-                    newDay ? 'font-medium' : 'text-transparent',
-                    newDay && r.date === today && 'text-primary',
+                    "w-36 shrink-0 text-sm tabular-nums",
+                    newDay ? "font-medium" : "text-transparent",
+                    newDay && r.date === today && "text-primary",
                   )}
                 >
-                  {THAI_WEEKDAYS_SHORT[weekdayOfYmd(r.date)]} {thaiDateLong(r.date)}
+                  {THAI_WEEKDAYS_SHORT[weekdayOfYmd(r.date)]}{" "}
+                  {thaiDateLong(r.date)}
                 </div>
 
-                <Badge
-                  tone="primary"
-                  className="shrink-0"
-                  style={tint?.chip}
-                >
+                <Badge tone="primary" className="shrink-0" style={tint?.chip}>
                   {r.groupCode}
                 </Badge>
-                <span className="shrink-0 text-sm font-medium">{r.subjectCode}</span>
+                <span className="shrink-0 text-sm font-medium">
+                  {r.subjectCode}
+                </span>
                 <span className="min-w-0 flex-1 truncate text-sm">
                   {r.subjectName}
                   {r.teacherName ? (
-                    <span className="text-muted-foreground"> · ครู {r.teacherName}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      · ครู {r.teacherName}
+                    </span>
                   ) : null}
                 </span>
 
@@ -874,15 +990,21 @@ function MonthBlock({
                 </Badge>
                 <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                   <MapPin className="size-3.5" strokeWidth={1.8} />
-                  {r.room ?? 'ยังไม่ระบุห้อง'}
+                  {r.room ?? "ยังไม่ระบุห้อง"}
                 </span>
 
                 <div className="ml-auto flex shrink-0 items-center gap-1.5">
-                  {isChecked ? <Badge tone="success">เช็คชื่อแล้ว</Badge> : null}
+                  {isChecked ? (
+                    <Badge tone="success">เช็คชื่อแล้ว</Badge>
+                  ) : null}
                   <button
                     onClick={() => onMove(r)}
                     disabled={isChecked}
-                    title={isChecked ? 'เช็คชื่อไปแล้ว — ย้ายวันไม่ได้' : 'ย้ายไปวันอื่น'}
+                    title={
+                      isChecked
+                        ? "เช็คชื่อไปแล้ว — ย้ายวันไม่ได้"
+                        : "ย้ายไปวันอื่น"
+                    }
                     className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-secondary/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                   >
                     <MoveRight className="size-4.5" strokeWidth={1.8} />
@@ -890,7 +1012,11 @@ function MonthBlock({
                   <button
                     onClick={() => onRemove(r)}
                     disabled={isChecked || busy === key}
-                    title={isChecked ? 'เช็คชื่อไปแล้ว — ลบวันนี้ไม่ได้' : 'เอาวันนี้ออกจากตาราง'}
+                    title={
+                      isChecked
+                        ? "เช็คชื่อไปแล้ว — ลบวันนี้ไม่ได้"
+                        : "เอาวันนี้ออกจากตาราง"
+                    }
                     className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
                   >
                     {busy === key ? (
@@ -925,7 +1051,11 @@ function MoveDayModal({
   async function submit() {
     if (saving) return;
     setSaving(true);
-    const r = await moveClassDay({ sectionId: row.sectionId, from: row.date, to });
+    const r = await moveClassDay({
+      sectionId: row.sectionId,
+      from: row.date,
+      to,
+    });
     setSaving(false);
     if (r.ok) {
       toast.success(r.message);
@@ -945,7 +1075,11 @@ function MoveDayModal({
           <Button variant="outline" onClick={onClose} disabled={saving}>
             ยกเลิก
           </Button>
-          <Button onClick={submit} disabled={saving || to === row.date} className="min-w-32">
+          <Button
+            onClick={submit}
+            disabled={saving || to === row.date}
+            className="min-w-32"
+          >
             {saving ? (
               <Loader2 className="size-4.5 animate-spin" />
             ) : (
@@ -963,14 +1097,15 @@ function MoveDayModal({
         {row.subjectCode} {row.subjectName} · กลุ่ม “{row.sectionName}”
       </p>
       <p className="mt-3 text-sm">
-        จาก <span className="font-medium">{thaiDateLong(row.date)}</span> ไปเป็น{' '}
+        จาก <span className="font-medium">{thaiDateLong(row.date)}</span> ไปเป็น{" "}
         <span className="font-medium text-primary">{thaiDateLong(to)}</span>
       </p>
       <div className="mt-3">
         <ThaiCalendar selected={[to]} onToggle={(d) => setTo(d)} />
       </div>
       <p className="mt-3 text-xs text-muted-foreground">
-        กลุ่มและรายชื่อนักเรียนไม่เปลี่ยน — ย้ายเฉพาะวันที่ และหน้าจัดนักเรียนเข้าวิชากับหน้าเช็คชื่อจะเห็นวันใหม่ทันที
+        กลุ่มและรายชื่อนักเรียนไม่เปลี่ยน — ย้ายเฉพาะวันที่
+        และหน้าจัดนักเรียนเข้าวิชากับหน้าเช็คชื่อจะเห็นวันใหม่ทันที
       </p>
     </Modal>
   );
@@ -994,7 +1129,10 @@ function UnscheduledSections({
   rows: ScheduleRow[];
   onPick: (s: ScheduleSection) => void;
 }) {
-  const scheduled = useMemo(() => new Set(rows.map((r) => r.sectionId)), [rows]);
+  const scheduled = useMemo(
+    () => new Set(rows.map((r) => r.sectionId)),
+    [rows],
+  );
   const missing = sections.filter((s) => !scheduled.has(s.id));
   if (missing.length === 0) return null;
 
@@ -1009,7 +1147,8 @@ function UnscheduledSections({
       />
       <div className="px-4 pb-4 sm:px-5 sm:pb-5">
         <p className="mb-3 text-xs text-muted-foreground">
-          กลุ่มเหล่านี้เปิดไว้แล้วแต่ยังไม่มีวันเรียน จึงยังเช็คชื่อไม่ได้ — กดเพื่อใส่วันให้ในแบบฟอร์มด้านบน
+          กลุ่มเหล่านี้เปิดไว้แล้วแต่ยังไม่มีวันเรียน จึงยังเช็คชื่อไม่ได้ —
+          กดเพื่อใส่วันให้ในแบบฟอร์มด้านบน
         </p>
         <ul className="flex flex-wrap gap-2">
           {missing.map((s) => {
@@ -1021,9 +1160,11 @@ function UnscheduledSections({
                   onClick={() => onPick(s)}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:border-primary/35 hover:bg-secondary/60"
                 >
-                  {subject ? `${subject.code} · ` : ''}
+                  {subject ? `${subject.code} · ` : ""}
                   {s.name}
-                  <span className="tabular-nums text-muted-foreground">{s.studentCount} คน</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {s.studentCount} คน
+                  </span>
                 </button>
               </li>
             );

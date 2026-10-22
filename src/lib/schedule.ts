@@ -1,12 +1,16 @@
 import 'server-only';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   attendance,
+  scheduleBlockDays,
+  scheduleBlockRows,
+  scheduleBlocks,
   subjectDates,
   subjectSections,
   trackGroups,
   trackSubjects,
+  type ScheduleRowSource,
 } from '@/db/schema';
 
 /**
@@ -27,6 +31,7 @@ export interface ScheduleRow {
   subjectCode: string;
   subjectName: string;
   teacherName: string | null;
+  institution: string | null;
   /** ภาคเรียน/ช่วง the วิชา belongs to — null on a วิชา nobody has placed yet */
   semester: number | null;
   phase: number | null;
@@ -56,6 +61,7 @@ export async function yearSchedule(yearId: number): Promise<ScheduleRow[]> {
       subjectCode: trackSubjects.code,
       subjectName: trackSubjects.name,
       teacherName: trackSubjects.teacherName,
+      institution: trackSubjects.institution,
       semester: trackSubjects.semester,
       phase: trackSubjects.phase,
       groupId: trackGroups.id,
@@ -96,4 +102,63 @@ export async function dayIsChecked(sectionId: number, date: string): Promise<boo
     .where(and(eq(attendance.sectionId, sectionId), eq(attendance.date, date)))
     .limit(1);
   return !!row;
+}
+
+/** One ห้อง of a ตารางรอบ, as the screen edits it. */
+export interface BlockRow {
+  id: number;
+  label: string;
+  source: ScheduleRowSource | null;
+}
+
+export interface BlockDay {
+  date: string;
+  note: string | null;
+}
+
+/**
+ * ตารางรอบ — a block of weeks in one ภาคเรียน, laid out the way the school
+ * prints it: วัน down the side, ห้อง under each วัน, the วิชา in the cell.
+ * The cells are not in here; they are the ScheduleRow lines whose date is one
+ * of `days` and whose sectionName is one of the `rows` labels.
+ */
+export interface ScheduleBlock {
+  id: number;
+  semester: number;
+  name: string;
+  sortOrder: number;
+  rows: BlockRow[];
+  days: BlockDay[];
+}
+
+export async function scheduleBlocksOf(yearId: number): Promise<ScheduleBlock[]> {
+  const blocks = await db
+    .select()
+    .from(scheduleBlocks)
+    .where(eq(scheduleBlocks.yearId, yearId))
+    .orderBy(asc(scheduleBlocks.semester), asc(scheduleBlocks.sortOrder), asc(scheduleBlocks.id));
+  if (!blocks.length) return [];
+  const ids = blocks.map((b) => b.id);
+  const [rows, days] = await Promise.all([
+    db
+      .select()
+      .from(scheduleBlockRows)
+      .where(inArray(scheduleBlockRows.blockId, ids))
+      .orderBy(asc(scheduleBlockRows.sortOrder), asc(scheduleBlockRows.id)),
+    db
+      .select()
+      .from(scheduleBlockDays)
+      .where(inArray(scheduleBlockDays.blockId, ids))
+      .orderBy(asc(scheduleBlockDays.date)),
+  ]);
+  return blocks.map((b) => ({
+    id: b.id,
+    semester: b.semester,
+    name: b.name,
+    sortOrder: b.sortOrder,
+    rows: rows
+      .filter((r) => r.blockId === b.id)
+      .map((r) => ({ id: r.id, label: r.label, source: r.source ?? null })),
+    days: days.filter((d) => d.blockId === b.id).map((d) => ({ date: d.date, note: d.note })),
+  }));
 }

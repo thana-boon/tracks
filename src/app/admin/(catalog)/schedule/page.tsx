@@ -9,13 +9,16 @@ import {
 } from '@/db/schema';
 import { activeYear } from '@/lib/years';
 import { requireCatalogEditor } from '@/lib/authz';
-import { checkedDayKeys, yearSchedule } from '@/lib/schedule';
+import { checkedDayKeys, scheduleBlocksOf, yearSchedule } from '@/lib/schedule';
+import { listHomerooms } from '@/lib/homeroom';
+import { gradeKey, isTrackGrade } from '@/lib/utils';
 import { listSections, studentCountsBySection } from '@/lib/data';
 import { SEMESTERS, trackChoiceRows, tracksForTerm } from '@/lib/tracks';
 import { NeedYear } from '@/components/ui';
 import {
   ScheduleManager,
   type ScheduleGroup,
+  type ScheduleHomeroom,
   type ScheduleSection,
   type ScheduleSubject,
   type ScheduleTrackGroup,
@@ -39,7 +42,7 @@ export default async function SchedulePage() {
   const year = await activeYear();
   if (!year) return <NeedYear />;
 
-  const [rows, checked, subjects, sections, counts] = await Promise.all([
+  const [rows, checked, subjects, sections, counts, blocks, homerooms] = await Promise.all([
     yearSchedule(year.id),
     checkedDayKeys(year.id),
     db
@@ -48,6 +51,7 @@ export default async function SchedulePage() {
         code: trackSubjects.code,
         name: trackSubjects.name,
         teacherName: trackSubjects.teacherName,
+        institution: trackSubjects.institution,
         semester: trackSubjects.semester,
         phase: trackSubjects.phase,
         groupId: trackSubjects.groupId,
@@ -61,7 +65,24 @@ export default async function SchedulePage() {
       .orderBy(asc(trackGroups.code), asc(trackSubjects.code)),
     listSections(year.id),
     studentCountsBySection(year.id),
+    scheduleBlocksOf(year.id),
+    listHomerooms(year),
   ]);
+
+  // ห้องประจำชั้น ม.4-6, offered on ตารางรอบ as ready-made ห้อง that bring
+  // their own นักเรียน.
+  const homeroomsOffered: ScheduleHomeroom[] = homerooms
+    .filter((h) => isTrackGrade(h.gradeLevel))
+    .sort(
+      (a, b) =>
+        gradeKey(a.gradeLevel) - gradeKey(b.gradeLevel) ||
+        a.classroom.localeCompare(b.classroom, 'th', { numeric: true }),
+    )
+    .map((h) => ({
+      gradeLevel: h.gradeLevel,
+      classroom: h.classroom,
+      studentCount: h.studentCount,
+    }));
 
   const groups: ScheduleGroup[] = [];
   for (const s of subjects) {
@@ -141,6 +162,8 @@ export default async function SchedulePage() {
     <ScheduleManager
       yearLabel={`ปีการศึกษา ${year.year}`}
       rows={rows}
+      blocks={blocks}
+      homerooms={homeroomsOffered}
       checkedKeys={checked}
       groups={groups}
       subjects={subjects as ScheduleSubject[]}

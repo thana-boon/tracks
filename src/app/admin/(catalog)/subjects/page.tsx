@@ -15,6 +15,7 @@ export default async function SubjectsPage() {
         code: trackSubjects.code,
         name: trackSubjects.name,
         teacherName: trackSubjects.teacherName,
+        institution: trackSubjects.institution,
         description: trackSubjects.description,
         active: trackSubjects.active,
         semester: trackSubjects.semester,

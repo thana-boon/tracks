@@ -25,6 +25,7 @@ export interface SubjectItem {
   code: string;
   name: string;
   teacherName: string | null;
+  institution: string | null;
   description: string | null;
   active: boolean;
   semester: number | null;
@@ -252,6 +253,7 @@ function SubjectRow({ subject: s, onEdit }: { subject: SubjectItem; onEdit: () =
         {s.teacherName ? (
           <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
             <User className="size-3.5" strokeWidth={1.8} /> {s.teacherName}
+            {s.institution ? ` · ${s.institution}` : ''}
           </p>
         ) : null}
       </div>
@@ -312,6 +314,7 @@ function SubjectForm({
   const [code, setCode] = useState(subject?.code ?? '');
   const [name, setName] = useState(subject?.name ?? '');
   const [teacherName, setTeacherName] = useState(subject?.teacherName ?? '');
+  const [institution, setInstitution] = useState(subject?.institution ?? '');
   const [description, setDescription] = useState(subject?.description ?? '');
   const [saving, setSaving] = useState(false);
 
@@ -324,6 +327,7 @@ function SubjectForm({
       code,
       name,
       teacherName,
+      institution,
       description,
       semester,
       phase,
@@ -403,6 +407,15 @@ function SubjectForm({
               placeholder="ไม่บังคับ"
             />
           </div>
+        </div>
+        <div>
+          <Label htmlFor="s-institution">สถาบันของผู้สอน</Label>
+          <Input
+            id="s-institution"
+            value={institution}
+            onChange={(e) => setInstitution(e.target.value)}
+            placeholder="เช่น มหาวิทยาลัยมหิดล — ไม่บังคับ"
+          />
         </div>
         <div>
           <Label htmlFor="s-name">ชื่อวิชา</Label>

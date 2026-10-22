@@ -14,6 +14,7 @@ const SubjectInput = z.object({
   code: z.string().trim().min(1, 'กรอกรหัสวิชา').max(30),
   name: z.string().trim().min(1, 'กรอกชื่อวิชา').max(160),
   teacherName: z.string().trim().max(160).optional().default(''),
+  institution: z.string().trim().max(160).optional().default(''),
   description: z.string().trim().max(500).optional().default(''),
   /** ช่วงที่เปิดสอน — ทั้งคู่เป็น null พร้อมกันเมื่อยังไม่ระบุ */
   semester: z.number().int().min(1).max(2).nullable().default(null),
@@ -27,6 +28,7 @@ export async function saveSubject(
     code: string;
     name: string;
     teacherName: string;
+    institution: string;
     description: string;
     semester: number | null;
     phase: number | null;
@@ -36,7 +38,7 @@ export async function saveSubject(
   const parsed = SubjectInput.safeParse(form);
   if (!parsed.success)
     return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
-  const { groupId, code, name, teacherName, description } = parsed.data;
+  const { groupId, code, name, teacherName, institution, description } = parsed.data;
   // A half-filled ช่วง would sort into a bucket the page cannot name, so the
   // pair moves together: either both are set or the วิชา has no ช่วง at all.
   const semester = parsed.data.semester && parsed.data.phase ? parsed.data.semester : null;
@@ -54,6 +56,7 @@ export async function saveSubject(
     code,
     name,
     teacherName: teacherName || null,
+    institution: institution || null,
     description: description || null,
     semester,
     phase,

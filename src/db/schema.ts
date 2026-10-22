@@ -170,6 +170,8 @@ export const trackSubjects = pgTable(
     description: text('description'),
     /** ครูผู้สอน — free text; the teacher need not exist in SchoolOS */
     teacherName: text('teacher_name'),
+    /** สถาบันของผู้สอน — "มหาวิทยาลัยมหิดล", free text, shown on ตารางรอบ */
+    institution: text('institution'),
     /**
      * ช่วงที่วิชานี้เปิดสอน — ภาคเรียน (1|2) และช่วงในภาคเรียนนั้น (1|2), so a
      * year holds four ช่วง in all. Both are null together for a วิชา nobody has
@@ -236,6 +238,72 @@ export const subjectDates = pgTable(
     uniqueIndex('subject_dates_uq').on(t.sectionId, t.date),
     index('subject_dates_date_idx').on(t.date),
   ],
+);
+
+// ── ตารางรอบ: the timetable an admin draws for one ภาคเรียน ─────
+// A ภาคเรียน holds one or more รอบ (a block of weeks); each รอบ names its own
+// ห้อง (the lines of the timetable — "ม.4-1", "ม.5-2") and its own วัน (the
+// columns). A cell is not stored here: it *is* the subject_dates row of the
+// รอบเรียน named after that ห้อง — so ม.4-1 learning ET101 on 19 ก.ค. is the
+// section "ม.4-1" of ET101 having that date, and every other screen (เช็คชื่อ,
+// จัดนักเรียนเข้าวิชา) reads the timetable without knowing it exists.
+export const scheduleBlocks = pgTable(
+  'schedule_blocks',
+  {
+    id: serial('id').primaryKey(),
+    yearId: integer('year_id')
+      .notNull()
+      .references(() => academicYears.id, { onDelete: 'cascade' }),
+    /** ภาคเรียน — 1 or 2 */
+    semester: integer('semester').notNull(),
+    /** "รอบที่ 1", "ช่วงก่อนสอบกลางภาค" */
+    name: text('name').notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('schedule_blocks_name_uq').on(t.yearId, t.semester, t.name),
+    index('schedule_blocks_term_idx').on(t.yearId, t.semester),
+  ],
+);
+
+/**
+ * One ห้อง of a รอบ — its label is also the name of every รอบเรียน the
+ * timetable opens for it. `source` says where those รอบเรียน take their
+ * นักเรียน from when opened: a ห้องประจำชั้น, a Track (or one แขนง), or a
+ * กลุ่มเรียนพิเศษ — or nowhere, to be filled on จัดนักเรียนเข้าวิชา.
+ */
+export type ScheduleRowSource =
+  | { kind: 'homeroom'; gradeLevel: string; classroom: string }
+  | { kind: 'track'; semester: number; trackId: number; optionId: number | null }
+  | { kind: 'classroom'; classroomId: number };
+
+export const scheduleBlockRows = pgTable(
+  'schedule_block_rows',
+  {
+    id: serial('id').primaryKey(),
+    blockId: integer('block_id')
+      .notNull()
+      .references(() => scheduleBlocks.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    source: jsonb('source').$type<ScheduleRowSource>(),
+    sortOrder: integer('sort_order').notNull().default(0),
+  },
+  (t) => [uniqueIndex('schedule_block_rows_uq').on(t.blockId, t.label)],
+);
+
+/** One วัน of a รอบ. `note` prints as a banner above it ("อ่านหนังสือสอบกลางภาค"). */
+export const scheduleBlockDays = pgTable(
+  'schedule_block_days',
+  {
+    id: serial('id').primaryKey(),
+    blockId: integer('block_id')
+      .notNull()
+      .references(() => scheduleBlocks.id, { onDelete: 'cascade' }),
+    date: date('date').notNull(),
+    note: text('note'),
+  },
+  (t) => [uniqueIndex('schedule_block_days_uq').on(t.blockId, t.date)],
 );
 
 // ── custom classrooms (ห้องเรียนใหม่ที่ระบบนี้สร้างเอง) ──────
