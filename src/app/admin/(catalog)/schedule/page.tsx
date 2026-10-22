@@ -1,12 +1,6 @@
 import { and, asc, count, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import {
-  classroomStudents,
-  classrooms,
-  people,
-  trackGroups,
-  trackSubjects,
-} from '@/db/schema';
+import { classroomStudents, classrooms, people, trackGroups, trackSubjects } from '@/db/schema';
 import { activeYear } from '@/lib/years';
 import { requireCatalogEditor } from '@/lib/authz';
 import { checkedDayKeys, scheduleBlocksOf, yearSchedule } from '@/lib/schedule';
@@ -42,7 +36,7 @@ export default async function SchedulePage() {
   const year = await activeYear();
   if (!year) return <NeedYear />;
 
-  const [rows, checked, subjects, sections, counts, blocks, homerooms] = await Promise.all([
+  const [rows, checked, subjects, sections, counts, blocks, homerooms, groups] = await Promise.all([
     yearSchedule(year.id),
     checkedDayKeys(year.id),
     db
@@ -67,6 +61,18 @@ export default async function SchedulePage() {
     studentCountsBySection(year.id),
     scheduleBlocksOf(year.id),
     listHomerooms(year),
+    // Every open กลุ่มวิชา — not only those with a วิชา yet — since a ครู may
+    // create the first วิชา of a กลุ่ม right from a cell of the timetable.
+    db
+      .select({
+        id: trackGroups.id,
+        code: trackGroups.code,
+        name: trackGroups.name,
+        color: trackGroups.color,
+      })
+      .from(trackGroups)
+      .where(eq(trackGroups.active, true))
+      .orderBy(asc(trackGroups.code)) as Promise<ScheduleGroup[]>,
   ]);
 
   // ห้องประจำชั้น ม.4-6, offered on ตารางรอบ as ready-made ห้อง that bring
@@ -83,12 +89,6 @@ export default async function SchedulePage() {
       classroom: h.classroom,
       studentCount: h.studentCount,
     }));
-
-  const groups: ScheduleGroup[] = [];
-  for (const s of subjects) {
-    if (!groups.some((g) => g.id === s.groupId))
-      groups.push({ id: s.groupId, code: s.groupCode, name: s.groupName, color: s.groupColor });
-  }
 
   // Every รอบเรียน of the year, including those with no วันเรียน yet: the third
   // field of the add form offers them, and a รอบ waiting for its schedule is

@@ -33,7 +33,7 @@ export async function saveSubject(
     semester: number | null;
     phase: number | null;
   },
-): Promise<ActionResult> {
+): Promise<ActionResult & { id?: number }> {
   const user = await requireCatalogEditor();
   const parsed = SubjectInput.safeParse(form);
   if (!parsed.success)
@@ -68,10 +68,16 @@ export async function saveSubject(
     revalidatePath('/admin/subjects');
     return { ok: true, message: `แก้ไขวิชา “${name}” แล้ว` };
   }
-  await db.insert(trackSubjects).values(values);
+  // The id goes back so ตารางเรียนทั้งปี can put the new วิชา straight into
+  // the cell it was created from.
+  const [created] = await db
+    .insert(trackSubjects)
+    .values(values)
+    .returning({ id: trackSubjects.id });
   await logActivity(user, 'create_subject', code);
   revalidatePath('/admin/subjects');
-  return { ok: true, message: `เพิ่มวิชา “${name}” แล้ว` };
+  revalidatePath('/admin/schedule');
+  return { ok: true, message: `เพิ่มวิชา “${name}” แล้ว`, id: created.id };
 }
 
 /**

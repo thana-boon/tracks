@@ -1,9 +1,9 @@
-"use server";
+'use server';
 
-import { revalidatePath } from "next/cache";
-import { and, eq, inArray, max, ne } from "drizzle-orm";
-import { z } from "zod";
-import { db } from "@/db";
+import { revalidatePath } from 'next/cache';
+import { and, eq, inArray, max, ne } from 'drizzle-orm';
+import { z } from 'zod';
+import { db } from '@/db';
 import {
   scheduleBlockDays,
   scheduleBlockRows,
@@ -11,14 +11,14 @@ import {
   subjectDates,
   subjectSections,
   trackSubjects,
-} from "@/db/schema";
-import { requireCatalogEditor } from "@/lib/authz";
-import { activeYear } from "@/lib/years";
-import { dayIsChecked } from "@/lib/schedule";
-import { logActivity } from "@/lib/log";
-import { normalizeYmd, thaiDateLong } from "@/lib/utils";
-import type { ActionResult } from "@/components/action-button";
-import { addClassDays } from "./actions";
+} from '@/db/schema';
+import { requireCatalogEditor } from '@/lib/authz';
+import { activeYear } from '@/lib/years';
+import { dayIsChecked } from '@/lib/schedule';
+import { logActivity } from '@/lib/log';
+import { normalizeYmd, thaiDateLong } from '@/lib/utils';
+import type { ActionResult } from '@/components/action-button';
+import { addClassDays } from './actions';
 
 /**
  * ตารางรอบ — the layout (รอบ, its ห้อง, its วัน) lives in schedule_block*; the
@@ -27,9 +27,9 @@ import { addClassDays } from "./actions";
  * day already checked in is never moved or taken away.
  */
 function revalidateSchedule() {
-  revalidatePath("/admin/schedule");
-  revalidatePath("/admin/register");
-  revalidatePath("/attendance");
+  revalidatePath('/admin/schedule');
+  revalidatePath('/admin/register');
+  revalidatePath('/attendance');
 }
 
 /** The รอบ, only if it belongs to the ปีการศึกษา in use. */
@@ -39,9 +39,7 @@ async function blockInActiveYear(blockId: number) {
   const [block] = await db
     .select()
     .from(scheduleBlocks)
-    .where(
-      and(eq(scheduleBlocks.id, blockId), eq(scheduleBlocks.yearId, year.id)),
-    )
+    .where(and(eq(scheduleBlocks.id, blockId), eq(scheduleBlocks.yearId, year.id)))
     .limit(1);
   return block ? { block, year } : null;
 }
@@ -76,21 +74,19 @@ async function cellsOf(yearId: number, labels: string[], dates: string[]) {
 
 const BlockInput = z.object({
   semester: z.number().int().min(1).max(2),
-  name: z.string().trim().min(1, "ตั้งชื่อรอบ").max(80),
+  name: z.string().trim().min(1, 'ตั้งชื่อรอบ').max(80),
 });
 
-export async function createBlock(
-  input: z.infer<typeof BlockInput>,
-): Promise<ActionResult> {
+export async function createBlock(input: z.infer<typeof BlockInput>): Promise<ActionResult> {
   const user = await requireCatalogEditor();
   const parsed = BlockInput.safeParse(input);
   if (!parsed.success)
     return {
       ok: false,
-      message: parsed.error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง",
+      message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง',
     };
   const year = await activeYear();
-  if (!year) return { ok: false, message: "ยังไม่ได้ซิงก์ปีการศึกษา" };
+  if (!year) return { ok: false, message: 'ยังไม่ได้ซิงก์ปีการศึกษา' };
   const { semester, name } = parsed.data;
 
   const [clash] = await db
@@ -113,33 +109,25 @@ export async function createBlock(
   const [{ last }] = await db
     .select({ last: max(scheduleBlocks.sortOrder) })
     .from(scheduleBlocks)
-    .where(
-      and(
-        eq(scheduleBlocks.yearId, year.id),
-        eq(scheduleBlocks.semester, semester),
-      ),
-    );
+    .where(and(eq(scheduleBlocks.yearId, year.id), eq(scheduleBlocks.semester, semester)));
   await db
     .insert(scheduleBlocks)
     .values({ yearId: year.id, semester, name, sortOrder: (last ?? 0) + 1 });
-  await logActivity(user, "create_schedule_block", `semester:${semester}`, {
+  await logActivity(user, 'create_schedule_block', `semester:${semester}`, {
     name,
   });
-  revalidatePath("/admin/schedule");
+  revalidatePath('/admin/schedule');
   return { ok: true, message: `เพิ่มรอบ “${name}” แล้ว` };
 }
 
-export async function renameBlock(
-  blockId: number,
-  name: string,
-): Promise<ActionResult> {
+export async function renameBlock(blockId: number, name: string): Promise<ActionResult> {
   const user = await requireCatalogEditor();
-  const clean = String(name ?? "")
+  const clean = String(name ?? '')
     .trim()
     .slice(0, 80);
-  if (!clean) return { ok: false, message: "ตั้งชื่อรอบ" };
+  if (!clean) return { ok: false, message: 'ตั้งชื่อรอบ' };
   const found = await blockInActiveYear(blockId);
-  if (!found) return { ok: false, message: "ไม่พบรอบนี้" };
+  if (!found) return { ok: false, message: 'ไม่พบรอบนี้' };
   const { block } = found;
   const [clash] = await db
     .select({ id: scheduleBlocks.id })
@@ -154,15 +142,12 @@ export async function renameBlock(
     )
     .limit(1);
   if (clash) return { ok: false, message: `มีรอบ “${clean}” อยู่แล้ว` };
-  await db
-    .update(scheduleBlocks)
-    .set({ name: clean })
-    .where(eq(scheduleBlocks.id, block.id));
-  await logActivity(user, "rename_schedule_block", `block:${block.id}`, {
+  await db.update(scheduleBlocks).set({ name: clean }).where(eq(scheduleBlocks.id, block.id));
+  await logActivity(user, 'rename_schedule_block', `block:${block.id}`, {
     from: block.name,
     to: clean,
   });
-  revalidatePath("/admin/schedule");
+  revalidatePath('/admin/schedule');
   return { ok: true, message: `เปลี่ยนชื่อเป็น “${clean}” แล้ว` };
 }
 
@@ -174,12 +159,12 @@ export async function renameBlock(
 export async function deleteBlock(blockId: number): Promise<ActionResult> {
   const user = await requireCatalogEditor();
   const found = await blockInActiveYear(blockId);
-  if (!found) return { ok: false, message: "ไม่พบรอบนี้" };
+  if (!found) return { ok: false, message: 'ไม่พบรอบนี้' };
   await db.delete(scheduleBlocks).where(eq(scheduleBlocks.id, blockId));
-  await logActivity(user, "delete_schedule_block", `block:${blockId}`, {
+  await logActivity(user, 'delete_schedule_block', `block:${blockId}`, {
     name: found.block.name,
   });
-  revalidatePath("/admin/schedule");
+  revalidatePath('/admin/schedule');
   return {
     ok: true,
     message: `ลบรอบ “${found.block.name}” แล้ว — วันเรียนที่จัดไว้ยังอยู่ในรายการทั้งหมด`,
@@ -189,20 +174,20 @@ export async function deleteBlock(blockId: number): Promise<ActionResult> {
 // ── ห้อง ─────────────────────────────────────────────────────
 
 const SourceInput = z
-  .discriminatedUnion("kind", [
+  .discriminatedUnion('kind', [
     z.object({
-      kind: z.literal("homeroom"),
+      kind: z.literal('homeroom'),
       gradeLevel: z.string().trim().min(1).max(20),
       classroom: z.string().trim().min(1).max(20),
     }),
     z.object({
-      kind: z.literal("track"),
+      kind: z.literal('track'),
       semester: z.number().int().min(1).max(2),
       trackId: z.number().int().positive(),
       optionId: z.number().int().positive().nullable(),
     }),
     z.object({
-      kind: z.literal("classroom"),
+      kind: z.literal('classroom'),
       classroomId: z.number().int().positive(),
     }),
   ])
@@ -214,7 +199,7 @@ const RowsInput = z.object({
     .array(
       z.object({
         id: z.number().int().positive().nullable(),
-        label: z.string().trim().min(1, "ใส่ชื่อห้องให้ครบทุกแถว").max(120),
+        label: z.string().trim().min(1, 'ใส่ชื่อห้องให้ครบทุกแถว').max(120),
         source: SourceInput,
       }),
     )
@@ -228,18 +213,16 @@ const RowsInput = z.object({
  * the cells are รอบเรียน named after the ห้อง, so the old name would leave
  * them out of the table with nobody seeing them go.
  */
-export async function saveBlockRows(
-  input: z.infer<typeof RowsInput>,
-): Promise<ActionResult> {
+export async function saveBlockRows(input: z.infer<typeof RowsInput>): Promise<ActionResult> {
   const user = await requireCatalogEditor();
   const parsed = RowsInput.safeParse(input);
   if (!parsed.success)
     return {
       ok: false,
-      message: parsed.error.issues[0]?.message ?? "ข้อมูลไม่ถูกต้อง",
+      message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง',
     };
   const found = await blockInActiveYear(parsed.data.blockId);
-  if (!found) return { ok: false, message: "ไม่พบรอบนี้" };
+  if (!found) return { ok: false, message: 'ไม่พบรอบนี้' };
   const { block, year } = found;
   const rows = parsed.data.rows;
 
@@ -248,25 +231,20 @@ export async function saveBlockRows(
   if (dup) return { ok: false, message: `ห้อง “${dup}” ซ้ำกัน` };
 
   const [before, days] = await Promise.all([
-    db
-      .select()
-      .from(scheduleBlockRows)
-      .where(eq(scheduleBlockRows.blockId, block.id)),
+    db.select().from(scheduleBlockRows).where(eq(scheduleBlockRows.blockId, block.id)),
     db
       .select({ date: scheduleBlockDays.date })
       .from(scheduleBlockDays)
       .where(eq(scheduleBlockDays.blockId, block.id)),
   ]);
-  const gone = before.filter(
-    (b) => !rows.some((r) => r.id === b.id && r.label === b.label),
-  );
+  const gone = before.filter((b) => !rows.some((r) => r.id === b.id && r.label === b.label));
   const used = await cellsOf(
     year.id,
     gone.map((g) => g.label),
     days.map((d) => d.date),
   );
   if (used.length) {
-    const names = [...new Set(used.map((u) => u.label))].join(", ");
+    const names = [...new Set(used.map((u) => u.label))].join(', ');
     return {
       ok: false,
       message: `ห้อง ${names} มีวิชาจัดไว้แล้ว — ล้างช่องของห้องนั้นก่อน จึงจะเปลี่ยนชื่อหรือลบได้`,
@@ -274,9 +252,7 @@ export async function saveBlockRows(
   }
 
   await db.transaction(async (tx) => {
-    await tx
-      .delete(scheduleBlockRows)
-      .where(eq(scheduleBlockRows.blockId, block.id));
+    await tx.delete(scheduleBlockRows).where(eq(scheduleBlockRows.blockId, block.id));
     if (rows.length)
       await tx.insert(scheduleBlockRows).values(
         rows.map((r, i) => ({
@@ -287,10 +263,10 @@ export async function saveBlockRows(
         })),
       );
   });
-  await logActivity(user, "save_schedule_rows", `block:${block.id}`, {
+  await logActivity(user, 'save_schedule_rows', `block:${block.id}`, {
     rows: labels,
   });
-  revalidatePath("/admin/schedule");
+  revalidatePath('/admin/schedule');
   return {
     ok: true,
     message: `บันทึกห้องของ “${block.name}” แล้ว (${rows.length} ห้อง)`,
@@ -305,7 +281,7 @@ const DaysInput = z.object({
     .array(
       z.object({
         date: z.string(),
-        note: z.string().trim().max(160).optional().default(""),
+        note: z.string().trim().max(160).optional().default(''),
       }),
     )
     .max(60),
@@ -316,32 +292,26 @@ const DaysInput = z.object({
  * sharing a day would show the same cells twice — and a วัน whose cells
  * already hold วิชา cannot simply be dropped (ย้ายวัน moves it instead).
  */
-export async function saveBlockDays(
-  input: z.infer<typeof DaysInput>,
-): Promise<ActionResult> {
+export async function saveBlockDays(input: z.infer<typeof DaysInput>): Promise<ActionResult> {
   const user = await requireCatalogEditor();
   const parsed = DaysInput.safeParse(input);
-  if (!parsed.success) return { ok: false, message: "ข้อมูลไม่ถูกต้อง" };
+  if (!parsed.success) return { ok: false, message: 'ข้อมูลไม่ถูกต้อง' };
   const found = await blockInActiveYear(parsed.data.blockId);
-  if (!found) return { ok: false, message: "ไม่พบรอบนี้" };
+  if (!found) return { ok: false, message: 'ไม่พบรอบนี้' };
   const { block, year } = found;
 
   const days = parsed.data.days.map((d) => ({
     date: normalizeYmd(d.date),
     note: d.note,
   }));
-  if (days.some((d) => !d.date))
-    return { ok: false, message: "วันที่ไม่ถูกต้อง" };
+  if (days.some((d) => !d.date)) return { ok: false, message: 'วันที่ไม่ถูกต้อง' };
   const dates = [...new Set(days.map((d) => d.date as string))];
 
   const others = dates.length
     ? await db
         .select({ date: scheduleBlockDays.date, name: scheduleBlocks.name })
         .from(scheduleBlockDays)
-        .innerJoin(
-          scheduleBlocks,
-          eq(scheduleBlockDays.blockId, scheduleBlocks.id),
-        )
+        .innerJoin(scheduleBlocks, eq(scheduleBlockDays.blockId, scheduleBlocks.id))
         .where(
           and(
             eq(scheduleBlocks.yearId, year.id),
@@ -374,10 +344,7 @@ export async function saveBlockDays(
     dropped,
   );
   if (used.length) {
-    const list = [...new Set(used.map((u) => u.date))]
-      .sort()
-      .map(thaiDateLong)
-      .join(", ");
+    const list = [...new Set(used.map((u) => u.date))].sort().map(thaiDateLong).join(', ');
     return {
       ok: false,
       message: `${list} มีวิชาจัดไว้แล้ว — ล้างช่องของวันนั้นก่อน หรือใช้ “ย้ายวัน”`,
@@ -389,15 +356,13 @@ export async function saveBlockDays(
     .filter((d) => (seen.has(d.date!) ? false : (seen.add(d.date!), true)))
     .map((d) => ({ blockId: block.id, date: d.date!, note: d.note || null }));
   await db.transaction(async (tx) => {
-    await tx
-      .delete(scheduleBlockDays)
-      .where(eq(scheduleBlockDays.blockId, block.id));
+    await tx.delete(scheduleBlockDays).where(eq(scheduleBlockDays.blockId, block.id));
     if (values.length) await tx.insert(scheduleBlockDays).values(values);
   });
-  await logActivity(user, "save_schedule_days", `block:${block.id}`, {
+  await logActivity(user, 'save_schedule_days', `block:${block.id}`, {
     days: dates.sort(),
   });
-  revalidatePath("/admin/schedule");
+  revalidatePath('/admin/schedule');
   return {
     ok: true,
     message: `บันทึกวันของ “${block.name}” แล้ว (${values.length} วัน)`,
@@ -416,27 +381,23 @@ const MoveDayInput = z.object({
  * All or nothing: one checked-in cell, or a ห้อง that already meets on the
  * new date, refuses the whole move.
  */
-export async function moveBlockDay(
-  input: z.infer<typeof MoveDayInput>,
-): Promise<ActionResult> {
+export async function moveBlockDay(input: z.infer<typeof MoveDayInput>): Promise<ActionResult> {
   const user = await requireCatalogEditor();
   const parsed = MoveDayInput.safeParse(input);
-  if (!parsed.success) return { ok: false, message: "ข้อมูลไม่ถูกต้อง" };
+  if (!parsed.success) return { ok: false, message: 'ข้อมูลไม่ถูกต้อง' };
   const from = normalizeYmd(parsed.data.from);
   const to = normalizeYmd(parsed.data.to);
-  if (!from || !to) return { ok: false, message: "วันที่ไม่ถูกต้อง" };
-  if (from === to) return { ok: true, message: "วันเดิม — ไม่มีอะไรเปลี่ยน" };
+  if (!from || !to) return { ok: false, message: 'วันที่ไม่ถูกต้อง' };
+  if (from === to) return { ok: true, message: 'วันเดิม — ไม่มีอะไรเปลี่ยน' };
   const found = await blockInActiveYear(parsed.data.blockId);
-  if (!found) return { ok: false, message: "ไม่พบรอบนี้" };
+  if (!found) return { ok: false, message: 'ไม่พบรอบนี้' };
   const { block, year } = found;
 
   const [taken] = await db
     .select({ name: scheduleBlocks.name })
     .from(scheduleBlockDays)
     .innerJoin(scheduleBlocks, eq(scheduleBlockDays.blockId, scheduleBlocks.id))
-    .where(
-      and(eq(scheduleBlocks.yearId, year.id), eq(scheduleBlockDays.date, to)),
-    )
+    .where(and(eq(scheduleBlocks.yearId, year.id), eq(scheduleBlockDays.date, to)))
     .limit(1);
   if (taken)
     return {
@@ -465,12 +426,7 @@ export async function moveBlockDay(
     const clash = await db
       .select({ id: subjectDates.id })
       .from(subjectDates)
-      .where(
-        and(
-          inArray(subjectDates.sectionId, sectionIds),
-          eq(subjectDates.date, to),
-        ),
-      )
+      .where(and(inArray(subjectDates.sectionId, sectionIds), eq(subjectDates.date, to)))
       .limit(1);
     if (clash.length)
       return {
@@ -484,23 +440,13 @@ export async function moveBlockDay(
       await tx
         .update(subjectDates)
         .set({ date: to })
-        .where(
-          and(
-            inArray(subjectDates.sectionId, sectionIds),
-            eq(subjectDates.date, from),
-          ),
-        );
+        .where(and(inArray(subjectDates.sectionId, sectionIds), eq(subjectDates.date, from)));
     await tx
       .update(scheduleBlockDays)
       .set({ date: to })
-      .where(
-        and(
-          eq(scheduleBlockDays.blockId, block.id),
-          eq(scheduleBlockDays.date, from),
-        ),
-      );
+      .where(and(eq(scheduleBlockDays.blockId, block.id), eq(scheduleBlockDays.date, from)));
   });
-  await logActivity(user, "move_schedule_day", `block:${block.id}`, {
+  await logActivity(user, 'move_schedule_day', `block:${block.id}`, {
     from,
     to,
     cells: sectionIds.length,
@@ -530,48 +476,36 @@ const CellInput = z.object({
  * they come from and the user is a ผู้ดูแล). Whatever วิชา the cell held
  * before loses that day — unless it has been checked in, which refuses.
  */
-export async function setCell(
-  input: z.infer<typeof CellInput>,
-): Promise<ActionResult> {
+export async function setCell(input: z.infer<typeof CellInput>): Promise<ActionResult> {
   const user = await requireCatalogEditor();
   const parsed = CellInput.safeParse(input);
-  if (!parsed.success) return { ok: false, message: "ข้อมูลไม่ถูกต้อง" };
+  if (!parsed.success) return { ok: false, message: 'ข้อมูลไม่ถูกต้อง' };
   const date = normalizeYmd(parsed.data.date);
-  if (!date) return { ok: false, message: "วันที่ไม่ถูกต้อง" };
+  if (!date) return { ok: false, message: 'วันที่ไม่ถูกต้อง' };
   const { rowId, subjectId } = parsed.data;
   const found = await blockInActiveYear(parsed.data.blockId);
-  if (!found) return { ok: false, message: "ไม่พบรอบนี้" };
+  if (!found) return { ok: false, message: 'ไม่พบรอบนี้' };
   const { block, year } = found;
 
   const [[row], [day]] = await Promise.all([
     db
       .select()
       .from(scheduleBlockRows)
-      .where(
-        and(
-          eq(scheduleBlockRows.id, rowId),
-          eq(scheduleBlockRows.blockId, block.id),
-        ),
-      )
+      .where(and(eq(scheduleBlockRows.id, rowId), eq(scheduleBlockRows.blockId, block.id)))
       .limit(1),
     db
       .select({ id: scheduleBlockDays.id })
       .from(scheduleBlockDays)
-      .where(
-        and(
-          eq(scheduleBlockDays.blockId, block.id),
-          eq(scheduleBlockDays.date, date),
-        ),
-      )
+      .where(and(eq(scheduleBlockDays.blockId, block.id), eq(scheduleBlockDays.date, date)))
       .limit(1),
   ]);
-  if (!row) return { ok: false, message: "ไม่พบห้องนี้ในรอบ" };
-  if (!day) return { ok: false, message: "วันนี้ไม่อยู่ในรอบ" };
+  if (!row) return { ok: false, message: 'ไม่พบห้องนี้ในรอบ' };
+  if (!day) return { ok: false, message: 'วันนี้ไม่อยู่ในรอบ' };
 
   const current = await cellsOf(year.id, [row.label], [date]);
   const others = current.filter((c) => c.subjectId !== subjectId);
   if (subjectId && current.length === 1 && current[0].subjectId === subjectId)
-    return { ok: true, message: "วิชาเดิม — ไม่มีอะไรเปลี่ยน" };
+    return { ok: true, message: 'วิชาเดิม — ไม่มีอะไรเปลี่ยน' };
   for (const c of others) {
     if (await dayIsChecked(c.sectionId, date))
       return {
@@ -580,7 +514,7 @@ export async function setCell(
       };
   }
 
-  let message = "";
+  let message = '';
   if (subjectId && !current.some((c) => c.subjectId === subjectId)) {
     const [section] = await db
       .select({ id: subjectSections.id })
@@ -597,10 +531,10 @@ export async function setCell(
       subjectId,
       sectionId: section?.id ?? null,
       newSectionName: row.label,
-      room: "",
+      room: '',
       dates: [date],
       // Only a ผู้ดูแล places นักเรียน; a moderator's cell opens the รอบ empty.
-      source: !section && user.role === "admin" ? (row.source ?? null) : null,
+      source: !section && user.role === 'admin' ? (row.source ?? null) : null,
     });
     if (!r.ok) return r;
     message = r.message;
@@ -617,7 +551,7 @@ export async function setCell(
       ),
     );
 
-  await logActivity(user, "set_schedule_cell", `block:${block.id}`, {
+  await logActivity(user, 'set_schedule_cell', `block:${block.id}`, {
     row: row.label,
     date,
     subjectId,
