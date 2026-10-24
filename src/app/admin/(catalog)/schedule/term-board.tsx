@@ -7,6 +7,7 @@ import {
   ArrowUp,
   BookPlus,
   CalendarDays,
+  Check,
   CalendarRange,
   Loader2,
   MoveRight,
@@ -343,6 +344,7 @@ function BlockCard({ block, ...shared }: Shared & { block: ScheduleBlock }) {
           row={cell.row}
           date={cell.date}
           cells={cells}
+          colorOf={colorOf}
           checked={shared.checked}
           groups={shared.groups}
           subjects={shared.subjects}
@@ -515,6 +517,7 @@ function CellEditor({
   row,
   date,
   cells,
+  colorOf,
   checked,
   groups,
   subjects,
@@ -524,6 +527,7 @@ function CellEditor({
   row: BlockRow;
   date: string;
   cells: Map<string, ScheduleRow[]>;
+  colorOf: Map<number, string>;
   checked: Set<string>;
   groups: ScheduleGroup[];
   subjects: ScheduleSubject[];
@@ -557,6 +561,10 @@ function CellEditor({
     setDates((ds) => (ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d].sort()));
   }
   const picked = subjects.find((s) => s.id === subjectId) ?? null;
+  // The วัน of this รอบ the chosen วิชา already holds in this ห้อง.
+  const sameDays = block.days
+    .map((d) => d.date)
+    .filter((d) => cellOf(d).some((c) => c.subjectId === subjectId));
   // วิชาของภาคเรียนนี้ขึ้นก่อน — they are nearly always the one wanted.
   const ofTerm = subjects.filter((s) => s.semester === block.semester);
   const rest = subjects.filter((s) => s.semester !== block.semester);
@@ -679,6 +687,10 @@ function CellEditor({
           {block.days.map((d) => {
             const on = dates.includes(d.date);
             const here = cellOf(d.date);
+            // The chip wears the colour of the วิชา already in that cell — the
+            // same colour as on the sheet — so the days one วิชา spans read as
+            // one set before anything is ticked.
+            const hex = here.length === 1 ? colorOf.get(here[0].subjectId) : undefined;
             return (
               <button
                 key={d.date}
@@ -686,28 +698,56 @@ function CellEditor({
                 onClick={() => toggleDate(d.date)}
                 aria-pressed={on}
                 className={cn(
-                  'rounded-lg border px-2.5 py-1 text-left text-xs tabular-nums transition-colors',
+                  'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-left text-xs tabular-nums transition-colors',
                   on
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground',
+                    ? 'border-primary text-foreground ring-2 ring-primary/40'
+                    : here.length
+                      ? 'border-transparent text-foreground hover:border-primary/50'
+                      : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground',
+                  here.length > 1 && 'bg-destructive/10',
                 )}
+                style={hex ? { backgroundColor: mixCard(hex, 22) } : undefined}
               >
+                {on ? <Check className="size-3.5 text-primary" strokeWidth={2.4} /> : null}
                 <span className="font-medium">
                   {THAI_WEEKDAYS_SHORT[weekdayOfYmd(d.date)]} {thaiDateShort(d.date)}
                 </span>
-                {here.length ? (
-                  <span className="ml-1.5 opacity-80">
-                    {here.map((c) => c.subjectCode).join(', ')}
-                    {lockedOn(d.date) ? ' ✓' : ''}
-                  </span>
-                ) : null}
+                {here.map((c) => (
+                  <SubjectCode
+                    key={c.sectionId}
+                    code={`${c.subjectCode}${lockedOn(d.date) ? ' ✓' : ''}`}
+                    hex={colorOf.get(c.subjectId)}
+                  />
+                ))}
               </button>
             );
           })}
         </div>
         <p className="mt-1.5 text-xs text-muted-foreground">
-          กดเพื่อเลือกได้หลายวัน — วิชาที่เลือกจะลงช่องของห้อง {row.label} ทุกวันที่เลือก
+          กดเพื่อเลือกได้หลายวัน (มีเครื่องหมาย ✓ และกรอบเข้ม) — วิชาที่เลือกจะลงช่องของห้อง{' '}
+          {row.label} ทุกวันที่เลือก · สีบอกวิชาที่ลงไว้แล้วในวันนั้น
         </p>
+        {picked && sameDays.length ? (
+          <div
+            className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-3 py-2 text-xs"
+            style={{ backgroundColor: mixCard(colorOf.get(picked.id) ?? 'var(--primary)', 14) }}
+          >
+            <span>
+              <SubjectCode code={picked.code} hex={colorOf.get(picked.id)} /> ห้อง {row.label} เรียน{' '}
+              {sameDays.length} วันในรอบนี้ ({sameDays.map(thaiDateShort).join(', ')}) —
+              เป็นกลุ่มเรียน “{row.label}” กลุ่มเดียวกัน เวลาเรียนนับรวมกันตอนประเมินผล
+            </span>
+            {sameDays.some((d) => !dates.includes(d)) ? (
+              <button
+                type="button"
+                className="font-medium text-primary hover:underline"
+                onClick={() => setDates((ds) => [...new Set([...ds, ...sameDays])].sort())}
+              >
+                เลือกวันของ {picked.code} ทั้งหมด
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {clashes.length ? (
