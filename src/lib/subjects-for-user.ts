@@ -10,7 +10,7 @@ import {
   trackSubjects,
 } from '@/db/schema';
 import { byClassOrder } from './utils';
-import { syncTrackRosters } from './track-roster';
+import { syncRowRosters } from './row-roster';
 import type { YearRow } from './years';
 
 /** One date classes are held on, with how many รอบเรียน meet that day. */
@@ -113,9 +113,9 @@ export interface SectionOnDay {
  * teacher.
  */
 export async function sectionsOnDate(year: YearRow, date: string): Promise<SectionOnDay[]> {
-  // นักเรียน who chose a Track count as registered in its กลุ่ม — placed before
+  // A ห้อง's นักเรียน count as registered in the กลุ่ม its cells hold — placed before
   // the day is read, so neither เช็คชื่อ nor the API sees that กลุ่ม empty.
-  await syncTrackRosters(year.id, date);
+  await syncRowRosters(year.id, date);
   const [sections, counts, checked] = await Promise.all([
     db
       .select({

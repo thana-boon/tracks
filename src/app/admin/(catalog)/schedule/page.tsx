@@ -2,7 +2,7 @@ import { and, asc, count, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { classroomStudents, classrooms, people, trackGroups, trackSubjects } from '@/db/schema';
 import { activeYear } from '@/lib/years';
-import { syncTrackRosters } from '@/lib/track-roster';
+import { syncRowRosters } from '@/lib/row-roster';
 import { requireCatalogEditor } from '@/lib/authz';
 import { checkedDayKeys, scheduleBlocksOf, yearSchedule } from '@/lib/schedule';
 import { listHomerooms } from '@/lib/homeroom';
@@ -36,8 +36,8 @@ export default async function SchedulePage() {
   const user = await requireCatalogEditor();
   const year = await activeYear();
   if (!year) return <NeedYear />;
-  // นักเรียน who chose a Track are in its กลุ่ม before the headcounts are read.
-  await syncTrackRosters(year.id);
+  // A ห้อง's นักเรียน are in the กลุ่ม its cells hold before the headcounts are read.
+  await syncRowRosters(year.id);
 
   const [rows, checked, subjects, sections, counts, blocks, homerooms, groups] = await Promise.all([
     yearSchedule(year.id),

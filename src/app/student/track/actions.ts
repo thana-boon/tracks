@@ -8,7 +8,7 @@ import { people, trackChoices, trackOptionRanks, trackOptions, tracks } from '@/
 import { actorOf, requireRole } from '@/lib/authz';
 import { logActivity } from '@/lib/log';
 import { latestTerm } from '@/lib/tracks';
-import { syncTrackRosters } from '@/lib/track-roster';
+import { syncRowRosters } from '@/lib/row-roster';
 import {
   SEMESTERS,
   changeLimitLabel,
@@ -170,7 +170,7 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
       change: existing.studentChanges + 1,
       limit: standing.limit,
     });
-    await syncTrackRosters(yearId);
+    await syncRowRosters(yearId);
     revalidateAll();
     return {
       ok: true,
@@ -198,7 +198,7 @@ export async function chooseTrack(form: z.infer<typeof ChooseInput>): Promise<Ac
     track: track.name,
     semester,
   });
-  await syncTrackRosters(yearId);
+  await syncRowRosters(yearId);
   revalidateAll();
   return {
     ok: true,

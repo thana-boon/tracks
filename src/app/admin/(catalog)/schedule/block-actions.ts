@@ -16,7 +16,7 @@ import { requireCatalogEditor } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { dayIsChecked } from '@/lib/schedule';
 import { logActivity } from '@/lib/log';
-import { syncTrackRosters } from '@/lib/track-roster';
+import { syncRowRosters } from '@/lib/row-roster';
 import { normalizeYmd, thaiDateLong } from '@/lib/utils';
 import type { ActionResult } from '@/components/action-button';
 import { addClassDays } from './actions';
@@ -264,12 +264,12 @@ export async function saveBlockRows(input: z.infer<typeof RowsInput>): Promise<A
         })),
       );
   });
-  // A ห้อง just linked to its Track brings that Track's นักเรียน into the
-  // กลุ่ม its cells already hold, not only into กลุ่ม opened from now on.
-  const placed = await syncTrackRosters(year.id);
+  // A ห้อง that has just named its นักเรียน brings them into the กลุ่ม its
+  // cells already hold, not only into กลุ่ม opened from now on.
+  const placed = await syncRowRosters(year.id);
   await logActivity(user, 'save_schedule_rows', `block:${block.id}`, {
     rows: labels,
-    ...(placed ? { trackPlaced: placed } : {}),
+    ...(placed ? { rosterPlaced: placed } : {}),
   });
   if (placed) revalidateSchedule();
   revalidatePath('/admin/schedule');
@@ -560,9 +560,9 @@ export async function setCell(input: z.infer<typeof CellInput>): Promise<ActionR
       .delete(subjectDates)
       .where(and(eq(subjectDates.sectionId, c.sectionId), eq(subjectDates.date, c.date)));
 
-  // Whoever pressed the cell, a ห้อง that names a Track fills its กลุ่ม with
-  // the นักเรียน who chose it — also when the กลุ่ม already existed.
-  await syncTrackRosters(year.id);
+  // Whoever pressed the cell, the ห้อง's นักเรียน are registered in the กลุ่ม
+  // — also when the กลุ่ม already existed.
+  await syncRowRosters(year.id);
 
   await logActivity(user, 'set_schedule_cell', `block:${block.id}`, {
     row: row.label,

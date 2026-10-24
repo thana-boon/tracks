@@ -17,7 +17,7 @@ import {
 import { actorOf, requireRole } from '@/lib/authz';
 import { logActivity } from '@/lib/log';
 import { optionProblem } from '@/lib/tracks';
-import { syncTrackRosters } from '@/lib/track-roster';
+import { syncRowRosters } from '@/lib/row-roster';
 import {
   GRADE_LEVELS,
   MAX_CHANGE_LIMIT,
@@ -557,7 +557,7 @@ export async function setStudentChoice(form: z.infer<typeof ChoiceInput>): Promi
         ).state !== 'open' || undefined,
     },
   );
-  await syncTrackRosters(yearId);
+  await syncRowRosters(yearId);
   revalidatePath('/admin/tracks/students');
   revalidatePath('/admin/register');
   revalidatePath('/admin/schedule');
