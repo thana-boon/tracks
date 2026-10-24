@@ -98,6 +98,8 @@ export interface SaveOutcome {
   /** null when the named sectionId does not meet on that date */
   sections: { sectionId: number; saved: number }[] | null;
   saved: number;
+  /** records sent with present: null whose row was removed */
+  cleared: number;
   rejected: Rejected[];
 }
 
@@ -109,6 +111,7 @@ export interface SaveOutcome {
  * not the same as "absent" — the other system may send the room in several
  * batches. A นักเรียน already checked (by a ครู, or an earlier batch) is
  * overwritten, the same as saving over them on the เช็คชื่อ screen.
+ * `present: null` removes the row, so that นักเรียน is ยังไม่เช็ค again.
  */
 export async function saveFromApi(input: {
   year: YearRow;
@@ -125,7 +128,7 @@ export async function saveFromApi(input: {
     .map((s) => s.id)
     .filter((id) => input.sectionId === undefined || id === input.sectionId);
   if (input.sectionId !== undefined && sectionIds.length === 0)
-    return { sections: null, saved: 0, rejected: [] };
+    return { sections: null, saved: 0, cleared: 0, rejected: [] };
 
   const codes = [...new Set(records.flatMap((r) => (r.studentCode?.trim() ? [r.studentCode.trim()] : [])))];
   const ids = [...new Set(records.flatMap((r) => (r.studentId ? [r.studentId] : [])))];
@@ -166,8 +169,23 @@ export async function saveFromApi(input: {
   });
   const subjectBy = new Map(subjectOf.map((s) => [s.id, s.subjectId]));
 
+  const toSave = resolved.filter((r) => r.present !== null);
+  const toClear = resolved.filter((r) => r.present === null);
+
   await db.transaction(async (tx) => {
-    for (const r of resolved) {
+    for (const r of toClear) {
+      await tx
+        .delete(attendance)
+        .where(
+          and(
+            eq(attendance.sectionId, r.sectionId),
+            eq(attendance.date, date),
+            eq(attendance.slot, slot),
+            eq(attendance.studentId, r.studentId),
+          ),
+        );
+    }
+    for (const r of toSave) {
       await tx
         .insert(attendance)
         .values({
@@ -177,21 +195,22 @@ export async function saveFromApi(input: {
           studentId: r.studentId,
           date,
           slot,
-          present: r.present,
+          present: r.present!,
           recordedBy: actor,
         })
         .onConflictDoUpdate({
           target: [attendance.sectionId, attendance.date, attendance.slot, attendance.studentId],
-          set: { present: r.present, recordedBy: actor, recordedAt: new Date() },
+          set: { present: r.present!, recordedBy: actor, recordedAt: new Date() },
         });
     }
   });
 
   const perSection = new Map<number, number>();
-  for (const r of resolved) perSection.set(r.sectionId, (perSection.get(r.sectionId) ?? 0) + 1);
+  for (const r of toSave) perSection.set(r.sectionId, (perSection.get(r.sectionId) ?? 0) + 1);
   return {
     sections: [...perSection].map(([sectionId, saved]) => ({ sectionId, saved })),
-    saved: resolved.length,
+    saved: toSave.length,
+    cleared: toClear.length,
     rejected,
   };
 }

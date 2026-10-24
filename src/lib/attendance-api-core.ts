@@ -11,7 +11,8 @@
 export interface IncomingRecord {
   studentCode?: string;
   studentId?: number;
-  present: boolean;
+  /** null = take the เช็คชื่อ back out (ยังไม่เช็ค again) */
+  present: boolean | null;
 }
 
 /** One นักเรียน registered in one รอบเรียน that meets on the date. */
@@ -33,7 +34,7 @@ export interface Rejected {
 export interface Resolved {
   studentId: number;
   sectionId: number;
-  present: boolean;
+  present: boolean | null;
 }
 
 const MESSAGE: Record<RejectReason, string> = {

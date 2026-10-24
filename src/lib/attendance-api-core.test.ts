@@ -75,3 +75,9 @@ test('the same นักเรียน sent twice keeps the later reading', () 
   );
   assert.deepEqual(resolved, [{ studentId: 1, sectionId: 11, present: true }]);
 });
+
+test('present: null comes through, to take a เช็คชื่อ back out', () => {
+  const { resolved, rejected } = resolveRecords([{ studentCode: '10001', present: null }], enrolments, known);
+  assert.deepEqual(rejected, []);
+  assert.deepEqual(resolved, [{ studentId: 1, sectionId: 11, present: null }]);
+});

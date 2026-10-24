@@ -22,7 +22,8 @@ const Body = z.object({
         .object({
           studentCode: z.string().trim().min(1).max(40).optional(),
           studentId: z.number().int().positive().optional(),
-          present: z.boolean(),
+          /** null takes a record back out */
+          present: z.boolean().nullable(),
         })
         .refine((r) => r.studentCode !== undefined || r.studentId !== undefined, {
           message: 'studentCode or studentId',
@@ -66,10 +67,11 @@ export async function POST(req: NextRequest) {
   if (outcome.sections === null)
     return apiError(422, 'not_scheduled', 'กลุ่มเรียนนี้ไม่ได้เรียนในวันที่ส่งมา');
 
-  if (outcome.saved > 0) {
+  if (outcome.saved > 0 || outcome.cleared > 0) {
     await logEvent(`api:${auth.key.id}`, auth.key.name, 'api_save_attendance', `date:${date}`, {
       slot,
       saved: outcome.saved,
+      cleared: outcome.cleared,
       rejected: outcome.rejected.length,
       sections: outcome.sections,
     });

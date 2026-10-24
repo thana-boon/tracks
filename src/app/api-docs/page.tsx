@@ -142,7 +142,7 @@ export default async function ApiDocsPage() {
               ['slot', 'บังคับ', '"morning" (เช้า) หรือ "afternoon" (บ่าย)'],
               ['records', 'บังคับ', 'รายการนักเรียน 1–2000 คน'],
               ['records[].studentCode', 'บังคับ*', 'รหัสนักเรียน (* หรือส่ง studentId แทน)'],
-              ['records[].present', 'บังคับ', 'true = มา · false = ไม่มา'],
+              ['records[].present', 'บังคับ', 'true = มา · false = ไม่มา · null = ลบผลที่บันทึกไว้ (กลับเป็นยังไม่เช็ค)'],
               ['date', 'ไม่บังคับ', 'YYYY-MM-DD — ไม่ส่ง = วันนี้'],
               ['sectionId', 'ไม่บังคับ', 'ส่งเฉพาะเมื่อนักเรียนมีมากกว่า 1 กลุ่มเรียนในวันเดียว'],
             ]}
@@ -163,6 +163,7 @@ export default async function ApiDocsPage() {
   "date": "2026-10-24",
   "slot": "morning",
   "saved": 1,
+  "cleared": 0,
   "sections": [{ "sectionId": 12, "saved": 1 }],
   "rejected": [
     {
