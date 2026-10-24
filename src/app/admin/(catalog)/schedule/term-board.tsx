@@ -342,7 +342,7 @@ function BlockCard({ block, ...shared }: Shared & { block: ScheduleBlock }) {
           block={block}
           row={cell.row}
           date={cell.date}
-          current={cells.get(`${cell.date}|${cell.row.label}`) ?? []}
+          cells={cells}
           checked={shared.checked}
           groups={shared.groups}
           subjects={shared.subjects}
@@ -505,12 +505,16 @@ function SubjectCode({ code, hex }: { code: string; hex?: string }) {
   );
 }
 
-/** Pick the วิชา of one cell, or clear it. */
+/**
+ * Pick the วิชา of one ห้อง's cells, or clear them — on the วัน pressed and
+ * any other วัน of the รอบ ticked alongside it, since a วิชา often meets on
+ * more than one day of a รอบ.
+ */
 function CellEditor({
   block,
   row,
   date,
-  current,
+  cells,
   checked,
   groups,
   subjects,
@@ -519,14 +523,18 @@ function CellEditor({
   block: ScheduleBlock;
   row: BlockRow;
   date: string;
-  current: ScheduleRow[];
+  cells: Map<string, ScheduleRow[]>;
   checked: Set<string>;
   groups: ScheduleGroup[];
   subjects: ScheduleSubject[];
   onClose: () => void;
 }) {
   const router = useRouter();
-  const [subjectId, setSubjectId] = useState<number | null>(current[0]?.subjectId ?? null);
+  const cellOf = (d: string) => cells.get(`${d}|${row.label}`) ?? [];
+  const lockedOn = (d: string) => cellOf(d).some((c) => checked.has(`${c.sectionId}:${d}`));
+  const [dates, setDates] = useState<string[]>([date]);
+  const current = dates.flatMap(cellOf);
+  const [subjectId, setSubjectId] = useState<number | null>(cellOf(date)[0]?.subjectId ?? null);
   const [saving, setSaving] = useState(false);
   // สร้างวิชาใหม่ — a ครู filling the sheet in meets a วิชา nobody has
   // catalogued yet far more often than a ผู้ดูแล does; making them leave for
@@ -540,7 +548,14 @@ function CellEditor({
     teacherName: '',
     institution: '',
   });
-  const locked = current.some((c) => checked.has(`${c.sectionId}:${date}`));
+  // A checked-in day keeps its วิชา — it may be ticked, but only to keep that วิชา.
+  const checkedDays = dates.filter(lockedOn);
+  const locked = checkedDays.some((d) => cellOf(d).some((c) => c.subjectId !== subjectId));
+  const clashes = dates.filter((d) => cellOf(d).length > 1);
+
+  function toggleDate(d: string) {
+    setDates((ds) => (ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d].sort()));
+  }
   const picked = subjects.find((s) => s.id === subjectId) ?? null;
   // วิชาของภาคเรียนนี้ขึ้นก่อน — they are nearly always the one wanted.
   const ofTerm = subjects.filter((s) => s.semester === block.semester);
@@ -572,7 +587,7 @@ function CellEditor({
     const r = await setCell({
       blockId: block.id,
       rowId: row.id,
-      date,
+      dates,
       subjectId: id,
     });
     setSaving(false);
@@ -608,7 +623,7 @@ function CellEditor({
             <Button
               variant="outline"
               onClick={() => save(null)}
-              disabled={saving || locked}
+              disabled={saving || checkedDays.length > 0}
               className="mr-auto text-destructive"
             >
               <X className="size-4.5" strokeWidth={1.9} />
@@ -623,6 +638,7 @@ function CellEditor({
             disabled={
               saving ||
               locked ||
+              dates.length === 0 ||
               (creating ? !fresh.code.trim() || !fresh.name.trim() || !fresh.groupId : !subjectId)
             }
           >
@@ -633,19 +649,77 @@ function CellEditor({
       }
     >
       <h2 id="cell-title" className="text-base font-semibold">
-        {row.label} · {thaiDateLong(date)}
+        {row.label} ·{' '}
+        {dates.length === 1
+          ? thaiDateLong(dates[0])
+          : dates.length
+            ? `${dates.length} วัน`
+            : 'ยังไม่เลือกวัน'}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">{block.name}</p>
 
-      {current.length > 1 ? (
+      <div className="mt-4">
+        <div className="flex items-center justify-between gap-2">
+          <Label>วันเรียน</Label>
+          {block.days.length > 1 ? (
+            <button
+              type="button"
+              className="text-xs text-primary hover:underline"
+              onClick={() =>
+                setDates(
+                  dates.length === block.days.length ? [date] : block.days.map((d) => d.date),
+                )
+              }
+            >
+              {dates.length === block.days.length ? 'เหลือวันนี้วันเดียว' : 'เลือกทุกวันของรอบ'}
+            </button>
+          ) : null}
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {block.days.map((d) => {
+            const on = dates.includes(d.date);
+            const here = cellOf(d.date);
+            return (
+              <button
+                key={d.date}
+                type="button"
+                onClick={() => toggleDate(d.date)}
+                aria-pressed={on}
+                className={cn(
+                  'rounded-lg border px-2.5 py-1 text-left text-xs tabular-nums transition-colors',
+                  on
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground',
+                )}
+              >
+                <span className="font-medium">
+                  {THAI_WEEKDAYS_SHORT[weekdayOfYmd(d.date)]} {thaiDateShort(d.date)}
+                </span>
+                {here.length ? (
+                  <span className="ml-1.5 opacity-80">
+                    {here.map((c) => c.subjectCode).join(', ')}
+                    {lockedOn(d.date) ? ' ✓' : ''}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          กดเพื่อเลือกได้หลายวัน — วิชาที่เลือกจะลงช่องของห้อง {row.label} ทุกวันที่เลือก
+        </p>
+      </div>
+
+      {clashes.length ? (
         <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          ช่องนี้มี {current.length} วิชาชนกัน ({current.map((c) => c.subjectCode).join(', ')}) —
-          เลือกวิชาที่ถูกต้องแล้วบันทึก วิชาอื่นจะถูกเอาออกจากวันนี้
+          มีวิชาชนกันใน {clashes.map(thaiDateShort).join(', ')} — เลือกวิชาที่ถูกต้องแล้วบันทึก
+          วิชาอื่นจะถูกเอาออกจากวันนั้น
         </p>
       ) : null}
-      {locked ? (
+      {checkedDays.length ? (
         <p className="mt-3 rounded-lg bg-secondary px-3 py-2 text-xs text-muted-foreground">
-          ช่องนี้เช็คชื่อไปแล้ว จึงเปลี่ยนวิชาไม่ได้
+          {checkedDays.map(thaiDateShort).join(', ')} เช็คชื่อไปแล้ว
+          จึงเปลี่ยนวิชาหรือล้างช่องของวันนั้นไม่ได้ — เอาวันนั้นออกจากที่เลือก หรือคงวิชาเดิมไว้
         </p>
       ) : null}
 
@@ -729,14 +803,13 @@ function CellEditor({
             id="cell-subject"
             value={subjectId ?? ''}
             onChange={(e) => setSubjectId(e.target.value ? Number(e.target.value) : null)}
-            disabled={locked}
             autoFocus
           >
             <option value="">— เลือกวิชา —</option>
             {options(ofTerm, `ภาคเรียนที่ ${block.semester} · `)}
             {options(rest, ofTerm.length ? 'วิชาอื่น · ' : '')}
           </Select>
-          {!locked ? (
+          {checkedDays.length === 0 ? (
             <Button
               variant="ghost"
               size="sm"
@@ -758,7 +831,8 @@ function CellEditor({
         </dl>
       ) : null}
       <p className="mt-3 text-xs text-muted-foreground">
-        บันทึกแล้วจะเป็นวันเรียนของกลุ่ม “{row.label}” ในวิชานั้น — ถ้ายังไม่มีกลุ่มนี้ ระบบเปิดให้
+        บันทึกแล้วทุกวันที่เลือกจะเป็นวันเรียนของกลุ่ม “{row.label}” ในวิชานั้น —
+        ถ้ายังไม่มีกลุ่มนี้ ระบบเปิดให้
         {row.source
           ? ' พร้อมใส่นักเรียนตามที่กำหนดไว้ที่ห้อง'
           : ' (ยังไม่มีนักเรียน — จัดต่อที่หน้าจัดนักเรียนเข้าวิชา)'}

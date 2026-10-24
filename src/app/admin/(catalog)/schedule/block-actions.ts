@@ -463,59 +463,68 @@ export async function moveBlockDay(input: z.infer<typeof MoveDayInput>): Promise
 const CellInput = z.object({
   blockId: z.number().int().positive(),
   rowId: z.number().int().positive(),
-  date: z.string(),
-  /** null clears the cell */
+  /** one or more วัน of the รอบ — a วิชา that meets on several days takes them all at once */
+  dates: z.array(z.string()).min(1, 'เลือกวันอย่างน้อย 1 วัน').max(60),
+  /** null clears the cells */
   subjectId: z.number().int().positive().nullable(),
 });
 
 /**
- * Put a วิชา in one cell — ห้อง × วัน — or clear it.
+ * Put a วิชา in the cells of one ห้อง on one or more วัน — or clear them.
  *
- * The cell is the รอบเรียน of that วิชา named after the ห้อง: found if it
+ * Each cell is the รอบเรียน of that วิชา named after the ห้อง: found if it
  * exists, opened if not (with the ห้อง's นักเรียน, when the ห้อง names where
- * they come from and the user is a ผู้ดูแล). Whatever วิชา the cell held
- * before loses that day — unless it has been checked in, which refuses.
+ * they come from and the user is a ผู้ดูแล). Whatever วิชา a cell held before
+ * loses that day — unless it has been checked in, which refuses the whole
+ * press: half the days changed would be harder to read back than none.
  */
 export async function setCell(input: z.infer<typeof CellInput>): Promise<ActionResult> {
   const user = await requireCatalogEditor();
   const parsed = CellInput.safeParse(input);
-  if (!parsed.success) return { ok: false, message: 'ข้อมูลไม่ถูกต้อง' };
-  const date = normalizeYmd(parsed.data.date);
-  if (!date) return { ok: false, message: 'วันที่ไม่ถูกต้อง' };
+  if (!parsed.success)
+    return { ok: false, message: parsed.error.issues[0]?.message ?? 'ข้อมูลไม่ถูกต้อง' };
+  const normalized = parsed.data.dates.map(normalizeYmd);
+  if (normalized.some((d) => !d)) return { ok: false, message: 'วันที่ไม่ถูกต้อง' };
+  const dates = [...new Set(normalized as string[])].sort();
   const { rowId, subjectId } = parsed.data;
   const found = await blockInActiveYear(parsed.data.blockId);
   if (!found) return { ok: false, message: 'ไม่พบรอบนี้' };
   const { block, year } = found;
 
-  const [[row], [day]] = await Promise.all([
+  const [[row], days] = await Promise.all([
     db
       .select()
       .from(scheduleBlockRows)
       .where(and(eq(scheduleBlockRows.id, rowId), eq(scheduleBlockRows.blockId, block.id)))
       .limit(1),
     db
-      .select({ id: scheduleBlockDays.id })
+      .select({ date: scheduleBlockDays.date })
       .from(scheduleBlockDays)
-      .where(and(eq(scheduleBlockDays.blockId, block.id), eq(scheduleBlockDays.date, date)))
-      .limit(1),
+      .where(and(eq(scheduleBlockDays.blockId, block.id), inArray(scheduleBlockDays.date, dates))),
   ]);
   if (!row) return { ok: false, message: 'ไม่พบห้องนี้ในรอบ' };
-  if (!day) return { ok: false, message: 'วันนี้ไม่อยู่ในรอบ' };
+  if (days.length !== dates.length) return { ok: false, message: 'มีวันที่ไม่อยู่ในรอบนี้' };
 
-  const current = await cellsOf(year.id, [row.label], [date]);
+  const current = await cellsOf(year.id, [row.label], dates);
   const others = current.filter((c) => c.subjectId !== subjectId);
-  if (subjectId && current.length === 1 && current[0].subjectId === subjectId)
-    return { ok: true, message: 'วิชาเดิม — ไม่มีอะไรเปลี่ยน' };
   for (const c of others) {
-    if (await dayIsChecked(c.sectionId, date))
+    if (await dayIsChecked(c.sectionId, c.date))
       return {
         ok: false,
-        message: `เปลี่ยนไม่ได้: ${row.label} · ${c.subjectCode} เช็คชื่อ ${thaiDateLong(date)} ไปแล้ว`,
+        message: `เปลี่ยนไม่ได้: ${row.label} · ${c.subjectCode} เช็คชื่อ ${thaiDateLong(c.date)} ไปแล้ว`,
       };
   }
+  const missing = subjectId
+    ? dates.filter((d) => !current.some((c) => c.date === d && c.subjectId === subjectId))
+    : [];
+  if (!others.length && !missing.length)
+    return {
+      ok: true,
+      message: subjectId ? 'วิชาเดิม — ไม่มีอะไรเปลี่ยน' : 'ช่องว่างอยู่แล้ว',
+    };
 
   let message = '';
-  if (subjectId && !current.some((c) => c.subjectId === subjectId)) {
+  if (subjectId && missing.length) {
     const [section] = await db
       .select({ id: subjectSections.id })
       .from(subjectSections)
@@ -532,7 +541,7 @@ export async function setCell(input: z.infer<typeof CellInput>): Promise<ActionR
       sectionId: section?.id ?? null,
       newSectionName: row.label,
       room: '',
-      dates: [date],
+      dates: missing,
       // Only a ผู้ดูแล places นักเรียน; a moderator's cell opens the รอบ empty.
       source: !section && user.role === 'admin' ? (row.source ?? null) : null,
     });
@@ -540,31 +549,26 @@ export async function setCell(input: z.infer<typeof CellInput>): Promise<ActionR
     message = r.message;
   }
 
-  if (others.length)
-    await db.delete(subjectDates).where(
-      and(
-        inArray(
-          subjectDates.sectionId,
-          others.map((c) => c.sectionId),
-        ),
-        eq(subjectDates.date, date),
-      ),
-    );
+  for (const c of others)
+    await db
+      .delete(subjectDates)
+      .where(and(eq(subjectDates.sectionId, c.sectionId), eq(subjectDates.date, c.date)));
 
   await logActivity(user, 'set_schedule_cell', `block:${block.id}`, {
     row: row.label,
-    date,
+    dates,
     subjectId,
-    removed: others.map((c) => c.subjectCode),
+    removed: others.map((c) => `${c.subjectCode}@${c.date}`),
   });
   revalidateSchedule();
+  const when = dates.length === 1 ? thaiDateLong(dates[0]) : `${dates.length} วัน`;
   if (!subjectId)
     return {
       ok: true,
-      message: `ล้างช่อง ${row.label} · ${thaiDateLong(date)} แล้ว`,
+      message: `ล้างช่อง ${row.label} · ${when} แล้ว`,
     };
   return {
     ok: true,
-    message: message || `${row.label} · ${thaiDateLong(date)} บันทึกแล้ว`,
+    message: message || `${row.label} · ${when} บันทึกแล้ว`,
   };
 }
