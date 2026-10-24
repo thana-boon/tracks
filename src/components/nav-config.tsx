@@ -62,9 +62,13 @@ const sw = 1.7;
  * caretaker screens that are nobody's daily work. Only ภาพรวม stays loose at the
  * top, since that is where every session starts.
  *
+ * เช็คชื่อ is not among a ครู's screens: the school takes attendance in another
+ * system now, so only the ผู้ดูแล keeps the งานเช็คชื่อ group, and a moderator
+ * keeps เช็คชื่อ alone, under the grant's heading.
+ *
  * Teachers and students have few enough screens that grouping would only add a
  * press, so their menus stay flat. A ครู holding a moderator grant gets the two
- * catalogue screens added to that flat menu, under a heading of their own so it
+ * catalogue screens and เช็คชื่อ added to that flat menu, under a heading of their own so it
  * is plain which links come with the grant.
  */
 export function navFor(role: AppRole, opts: { moderator?: boolean } = {}): NavEntry[] {
@@ -137,7 +141,6 @@ export function navFor(role: AppRole, opts: { moderator?: boolean } = {}): NavEn
   if (role === 'teacher') {
     return [
       { href: '/teacher', label: 'ภาพรวม', icon: <LayoutDashboard className="size-5" strokeWidth={sw} /> },
-      { href: '/attendance', label: 'เช็คชื่อ', icon: <ClipboardCheck className="size-5" strokeWidth={sw} /> },
       { href: '/results', label: 'เวลาเข้าเรียน', icon: <CalendarCheck className="size-5" strokeWidth={sw} /> },
       { href: '/homeroom', label: 'ห้องที่ปรึกษา', icon: <Users className="size-5" strokeWidth={sw} /> },
       ...(opts.moderator
@@ -146,6 +149,7 @@ export function navFor(role: AppRole, opts: { moderator?: boolean } = {}): NavEn
               label: 'ช่วยจัดวิชาเสริม',
               icon: <Settings2 className="size-5" strokeWidth={sw} />,
               items: [
+                { href: '/attendance', label: 'เช็คชื่อ', icon: <ClipboardCheck className="size-5" strokeWidth={sw} /> },
                 { href: '/admin/subjects', label: 'วิชาเสริม', icon: <BookOpen className="size-5" strokeWidth={sw} /> },
                 { href: '/admin/schedule', label: 'ตารางเรียนทั้งปี', icon: <CalendarRange className="size-5" strokeWidth={sw} /> },
               ],

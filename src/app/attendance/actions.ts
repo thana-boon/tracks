@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db';
 import { attendance, subjectDates, subjectSections } from '@/db/schema';
-import { requireRole } from '@/lib/authz';
+import { requireAttendanceTaker } from '@/lib/authz';
 import { actorOf } from '@/lib/authz';
 import { activeYear } from '@/lib/years';
 import { logActivity } from '@/lib/log';
@@ -37,7 +37,7 @@ const ClearInput = z.object({
 export async function loadSectionsOnDate(
   date: string,
 ): Promise<{ ok: boolean; message?: string; sections: SectionOnDay[] }> {
-  await requireRole('admin', 'teacher');
+  await requireAttendanceTaker();
   const year = await activeYear();
   if (!year) return { ok: false, message: 'ยังไม่ได้ซิงก์ปีการศึกษา', sections: [] };
   const ymd = normalizeYmd(date);
@@ -50,7 +50,7 @@ export async function loadDayRoster(
   sectionId: number,
   date: string,
 ): Promise<{ ok: boolean; message?: string; roster: DayRosterEntry[] }> {
-  await requireRole('admin', 'teacher');
+  await requireAttendanceTaker();
   const year = await activeYear();
   if (!year) return { ok: false, message: 'ยังไม่ได้ซิงก์ปีการศึกษา', roster: [] };
   const ymd = normalizeYmd(date);
@@ -67,7 +67,7 @@ export async function loadDayRoster(
 export async function saveDayAttendance(
   input: z.infer<typeof SaveInput>,
 ): Promise<ActionResult> {
-  const user = await requireRole('admin', 'teacher');
+  const user = await requireAttendanceTaker();
   const parsed = SaveInput.safeParse(input);
   if (!parsed.success) return { ok: false, message: 'ข้อมูลไม่ถูกต้อง' };
   const year = await activeYear();
@@ -150,7 +150,7 @@ export async function saveDayAttendance(
 export async function clearDayAttendance(
   input: z.infer<typeof ClearInput>,
 ): Promise<ActionResult> {
-  const user = await requireRole('admin', 'teacher');
+  const user = await requireAttendanceTaker();
   const parsed = ClearInput.safeParse(input);
   if (!parsed.success) return { ok: false, message: 'ข้อมูลไม่ถูกต้อง' };
   const year = await activeYear();

@@ -112,6 +112,21 @@ export async function requireCatalogEditor(): Promise<SessionUser> {
   return user;
 }
 
+/**
+ * Whether this user may use เช็คชื่อ. The school takes attendance in another
+ * system now, so of the ครู only a moderator keeps it — every ผู้ดูแล does.
+ */
+export function canTakeAttendance(user: SessionUser): boolean {
+  return user.role === 'admin' || (user.role === 'teacher' && Boolean(user.moderator));
+}
+
+/** Require a user who may use เช็คชื่อ — the guard for the page and its server actions. */
+export async function requireAttendanceTaker(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (!canTakeAttendance(user)) redirect(dashboardPath(user.role));
+  return user;
+}
+
 export function dashboardPath(role: AppRole): string {
   switch (role) {
     case 'admin':

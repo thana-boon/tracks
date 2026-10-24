@@ -9,8 +9,10 @@ import { Card } from '@/components/ui';
 
 export const metadata = { title: 'ภาพรวมครู' };
 
-const tiles = [
-  { href: '/attendance', title: 'เช็คชื่อ', desc: 'บันทึกการเข้าเรียน เช้า/บ่าย', icon: ClipboardCheck, tone: 'primary' },
+/** Only a moderator still takes เช็คชื่อ here; everyone else uses the school's other system. */
+const checkInTile = { href: '/attendance', title: 'เช็คชื่อ', desc: 'บันทึกการเข้าเรียน เช้า/บ่าย', icon: ClipboardCheck, tone: 'primary' } as const;
+
+const baseTiles = [
   { href: '/results', title: 'เวลาเข้าเรียน', desc: 'ห้องที่ปรึกษาของคุณ — มากี่ครั้ง ขาดกี่ครั้ง', icon: CalendarCheck, tone: 'accent' },
 ] as const;
 
@@ -23,6 +25,7 @@ const iconTone: Record<string, string> = {
 export default async function TeacherHome() {
   const user = await requireRole('teacher');
   const year = await activeYear();
+  const tiles = user.moderator ? [checkInTile, ...baseTiles] : baseTiles;
 
   let homeroomCount = 0;
   if (year && user.personId) {
@@ -39,7 +42,7 @@ export default async function TeacherHome() {
         <p className="text-xs font-medium uppercase tracking-wide text-white/60">ระบบวิชาเสริม ม.ปลาย</p>
         <h1 className="mt-1 text-2xl font-semibold">สวัสดี {user.name}</h1>
         <p className="mt-1 text-sm text-white/70">
-          {year ? `ปีการศึกษา ${year.year}` : 'ยังไม่ได้ซิงก์ปีการศึกษา'} · ครูทุกคนเช็คชื่อวิชาเสริมได้ทุกวิชา
+          {year ? `ปีการศึกษา ${year.year}` : 'ยังไม่ได้ซิงก์ปีการศึกษา'}
         </p>
         <div className="mt-4 h-0.5 w-10 rounded-full bg-[#F5C518]" />
       </section>
