@@ -45,9 +45,12 @@ const ACTION_LABEL: Record<string, string> = {
   revoke_admin: 'ถอนสิทธิ์ผู้ดูแล',
   grant_moderator: 'ให้สิทธิ์ Moderator',
   revoke_moderator: 'ถอนสิทธิ์ Moderator',
+  create_api_key: 'ออกกุญแจ API',
+  revoke_api_key: 'ยกเลิกกุญแจ API',
+  api_save_attendance: 'บันทึกเช็คชื่อจากระบบอื่น',
 };
 
-const DESTRUCTIVE = new Set(['delete_group', 'delete_subject', 'delete_classroom', 'delete_section', 'remove_class_date', 'delete_backup', 'restore_backup', 'restore_upload']);
+const DESTRUCTIVE = new Set(['delete_group', 'delete_subject', 'delete_classroom', 'delete_section', 'remove_class_date', 'delete_backup', 'restore_backup', 'restore_upload', 'revoke_api_key']);
 
 export default async function LogsPage() {
   const rows = await db

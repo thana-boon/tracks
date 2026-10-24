@@ -627,3 +627,28 @@ export const trackOptionRanks = pgTable(
     index('track_option_ranks_option_idx').on(t.optionId),
   ],
 );
+
+// ── กุญแจ API: what another system shows to read the ตาราง and send เช็คชื่อ ──
+// Issued and revoked on /admin/api-keys. Only a SHA-256 of the key is kept —
+// the key itself is shown once, at the moment it is made, and a lost one is
+// replaced rather than recovered. Revoking stamps `revokedAt` instead of
+// deleting, so attendance a key wrote (`recorded_by = api:<id>`) still says
+// which system it came from.
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: serial('id').primaryKey(),
+    /** which system holds it — "ระบบสแกนหน้า อาคาร 3" */
+    name: text('name').notNull(),
+    /** the first characters of the key, so a ผู้ดูแล can tell two apart */
+    prefix: text('prefix').notNull(),
+    keyHash: text('key_hash').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdByName: text('created_by_name').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at'),
+    revokedAt: timestamp('revoked_at'),
+    revokedByName: text('revoked_by_name'),
+  },
+  (t) => [uniqueIndex('api_keys_hash_uq').on(t.keyHash)],
+);

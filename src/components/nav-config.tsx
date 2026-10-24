@@ -25,6 +25,7 @@ import {
   UserRoundX,
   ChartPie,
   Trophy,
+  KeyRound,
 } from 'lucide-react';
 import type { AppRole } from '@/lib/session';
 
@@ -126,6 +127,7 @@ export function navFor(role: AppRole, opts: { moderator?: boolean } = {}): NavEn
         items: [
           { href: '/admin/settings', label: 'ตั้งค่าเอกสาร', icon: <Stamp className="size-5" strokeWidth={sw} /> },
           { href: '/admin/permissions', label: 'สิทธิ์ผู้ดูแล', icon: <ShieldCheck className="size-5" strokeWidth={sw} /> },
+          { href: '/admin/api-keys', label: 'กุญแจ API', icon: <KeyRound className="size-5" strokeWidth={sw} /> },
           { href: '/admin/backup', label: 'สำรองข้อมูล', icon: <DatabaseBackup className="size-5" strokeWidth={sw} /> },
           { href: '/admin/logs', label: 'ประวัติการใช้งาน', icon: <ScrollText className="size-5" strokeWidth={sw} /> },
         ],
