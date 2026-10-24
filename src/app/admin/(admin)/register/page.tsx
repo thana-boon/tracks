@@ -9,6 +9,7 @@ import {
   trackSubjects,
 } from '@/db/schema';
 import { activeYear } from '@/lib/years';
+import { syncTrackRosters } from '@/lib/track-roster';
 import { SEMESTERS, trackChoiceRows, tracksForTerm } from '@/lib/tracks';
 import {
   listSections,
@@ -32,6 +33,8 @@ export const metadata = { title: 'จัดนักเรียนเข้า�
 export default async function RegisterPage() {
   const year = await activeYear();
   if (!year) return <NeedYear />;
+  // นักเรียน who chose a Track are in its กลุ่ม before the rosters are read.
+  await syncTrackRosters(year.id);
 
   const [subjects, sections, datesBy, counts, checkedBy, regs, students, rooms, roomMembers] =
     await Promise.all([
